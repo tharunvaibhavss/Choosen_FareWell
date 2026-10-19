@@ -50,7 +50,15 @@ export const QuestionnairePage: React.FC<QuestionnairePageProps> = ({ user }) =>
         setLoading(true);
         setError(null);
 
-        // Check if already submitted
+        // 1. Ensure one-time reset is completed for this student before loading questionnaire
+        if (user.profile.role === 'student') {
+          const resetRes = await QuestionnaireService.ensureFirstLoginReset();
+          if (!resetRes.success) {
+            throw new Error(resetRes.error || 'Failed to initialize questionnaire reset.');
+          }
+        }
+
+        // 2. Check if already submitted
         const existingSub = await QuestionnaireService.getSubmission(user.id);
         if (existingSub && isMounted) {
           setSubmission(existingSub);

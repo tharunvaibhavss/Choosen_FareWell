@@ -250,4 +250,32 @@ export class QuestionnaireService {
       return { success: false, error: message };
     }
   }
+
+  /**
+   * Ensures the student's one-time reset is completed before questionnaire initialization.
+   * Safe, idempotent, and backed by PostgreSQL advisory transaction lock.
+   */
+  static async ensureFirstLoginReset(): Promise<{ success: boolean; status?: string; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('execute_student_first_login_reset');
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data && !data.success) {
+        return { success: false, error: data.message || 'One-time reset failed' };
+      }
+
+      return { success: true, status: data?.status };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'One-time reset failed';
+      return { success: false, error: message };
+    }
+  }
 }
+

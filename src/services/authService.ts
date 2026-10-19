@@ -103,6 +103,24 @@ export class AuthService {
         return { user: null, error: 'Your account has been deactivated. Please contact the administrator.' };
       }
 
+      // Stage 4.5: Ensure one-time submission reset for students on their first login after deployment
+      if (profile.role === 'student') {
+        console.log(`[Auth Stage 4.5] Checking one-time questionnaire reset for student '${profile.roll_number}'...`);
+        const { data: resetResult, error: resetErr } = await supabase.rpc('execute_student_first_login_reset');
+
+        if (resetErr || (resetResult && !resetResult.success)) {
+          const detail = resetErr?.message || resetResult?.message || 'Failed to initialize questionnaire reset.';
+          console.error('[Auth Stage 4.5] One-time reset failed:', detail);
+          await supabase.auth.signOut();
+          return {
+            user: null,
+            error: 'Unable to initialize your fresh questionnaire session. Please try signing in again.',
+          };
+        }
+
+        console.log(`[Auth Stage 4.5] One-time reset status:`, resetResult?.status);
+      }
+
       console.log(`[Auth Stage 5] Successfully verified profile for '${profile.roll_number}' (Role: ${profile.role}). Establishing session.`);
 
       const authUser: AuthUser = {
@@ -117,7 +135,9 @@ export class AuthService {
         },
       };
 
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(authUser));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(authUser));
+      }
       return { user: authUser, error: null };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Login failed';
@@ -134,12 +154,16 @@ export class AuthService {
         // continue
       }
     }
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
   }
 
   static async getCurrentUser(): Promise<AuthUser | null> {
     if (!isSupabaseConfigured || !supabase) {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      }
       return null;
     }
 
@@ -158,7 +182,9 @@ export class AuthService {
             email: sessionData.session.user.email,
             profile,
           };
-          localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+          }
           return user;
         }
       }
@@ -166,7 +192,9 @@ export class AuthService {
       // Session verification error
     }
 
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
     return null;
   }
 }
