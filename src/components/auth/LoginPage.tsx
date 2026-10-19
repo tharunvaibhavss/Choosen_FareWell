@@ -30,18 +30,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, isSupabase
     setLoading(true);
 
     try {
+      console.log(`[LoginPage] Submitting authentication request for identifier: '${identifier.trim()}'`);
       const { user, error: loginError } = await AuthService.login({
         identifier,
         password,
       });
 
       if (loginError || !user) {
+        console.warn('[LoginPage] Authentication failed:', loginError);
         setError(loginError || 'Authentication failed. Please check your credentials.');
       } else {
+        console.log(`[LoginPage] Authentication successful for '${user.profile.full_name}' (${user.profile.role}).`);
         onLoginSuccess(user);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed';
+      console.error('[LoginPage] Unexpected exception:', msg);
       setError(msg);
     } finally {
       setLoading(false);

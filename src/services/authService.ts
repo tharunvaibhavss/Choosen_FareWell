@@ -9,7 +9,7 @@ export class AuthService {
     if (clean.includes('@')) {
       return clean;
     }
-    if (clean === 'admin' || clean === 'admin01') {
+    if (clean === 'admin' || clean === 'admin01' || clean === 'administrator') {
       return 'admin@mcafarewell';
     }
     // Student roll number e.g. mca2501 -> mca2501@mca2527.college
@@ -36,18 +36,24 @@ export class AuthService {
 
     try {
       const email = this.normalizeToEmail(cleanId);
+      console.log(`[Auth Stage 1] Identifier '${cleanId}' resolved to email '${email}'. Attempting sign-in...`);
+
       const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (authErr) {
+        console.warn(`[Auth Stage 2] Supabase Auth sign-in rejected for '${email}':`, authErr.message);
         return { user: null, error: authErr.message };
       }
 
       if (!authData.user) {
+        console.warn(`[Auth Stage 2] Supabase Auth sign-in returned no user record for '${email}'.`);
         return { user: null, error: 'User authentication failed.' };
       }
+
+      console.log(`[Auth Stage 3] Supabase Auth succeeded (UID: ${authData.user.id}). Fetching profile from database...`);
 
       // Fetch verified profile from profiles table (Server-side trusted source)
       const { data: profile, error: profileErr } = await supabase
@@ -57,13 +63,17 @@ export class AuthService {
         .single();
 
       if (profileErr || !profile) {
+        console.warn(`[Auth Stage 3] Profile fetch failed for UID ${authData.user.id}:`, profileErr?.message);
         return { user: null, error: 'Could not load your student profile. Please contact the administrator.' };
       }
 
       if (profile.is_active === false) {
+        console.warn(`[Auth Stage 4] Profile is deactivated for UID ${authData.user.id}. Signing out.`);
         await supabase.auth.signOut();
         return { user: null, error: 'Your account has been deactivated. Please contact the administrator.' };
       }
+
+      console.log(`[Auth Stage 5] Successfully verified profile for '${profile.roll_number}' (Role: ${profile.role}). Establishing session.`);
 
       const authUser: AuthUser = {
         id: authData.user.id,
@@ -81,6 +91,7 @@ export class AuthService {
       return { user: authUser, error: null };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Login failed';
+      console.error('[Auth] Unexpected login exception:', message);
       return { user: null, error: message };
     }
   }
