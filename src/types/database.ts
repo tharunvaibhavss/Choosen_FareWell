@@ -9,6 +9,8 @@ export interface Profile {
   is_active?: boolean;
   section?: string;
   created_at?: string;
+  must_change_password?: boolean;
+  password_changed_at?: string | null;
 }
 
 export interface Question {
@@ -63,6 +65,8 @@ export interface StudentSummaryItem {
   answeredCount: number;
   status: 'submitted' | 'in_progress' | 'not_started';
   submittedAt: string | null;
+  mustChangePassword?: boolean;
+  passwordChangedAt?: string | null;
 }
 
 export interface DetailedAnswerExportRow {

@@ -130,8 +130,12 @@ export class AuthService {
           id: profile.id,
           roll_number: profile.roll_number,
           full_name: profile.full_name,
+          email: profile.email,
           role: profile.role,
+          is_active: profile.is_active,
           created_at: profile.created_at,
+          must_change_password: profile.role === 'admin' ? false : (profile.must_change_password ?? true),
+          password_changed_at: profile.password_changed_at || null,
         },
       };
 
@@ -159,6 +163,75 @@ export class AuthService {
     }
   }
 
+  static async changePassword(
+    newPassword: string,
+    currentPassword?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
+    }
+
+    try {
+      // 1. Check current session
+      const { data: sessionData } = await supabase.auth.getSession();
+      const currentUser = sessionData.session?.user;
+      if (!currentUser || !currentUser.email) {
+        return { success: false, error: 'You are not currently authenticated. Please sign in again.' };
+      }
+
+      // 2. Validate new password length
+      const trimmed = newPassword.trim();
+      if (!trimmed || trimmed.length < 6) {
+        return { success: false, error: 'New password must be at least 6 characters long.' };
+      }
+
+      // 3. If current password was provided, verify it first against Supabase Auth
+      if (currentPassword && currentPassword.trim()) {
+        const { error: verifyErr } = await supabase.auth.signInWithPassword({
+          email: currentUser.email,
+          password: currentPassword,
+        });
+
+        if (verifyErr) {
+          return {
+            success: false,
+            error: 'Current or initial password is incorrect. Please re-check and try again.',
+          };
+        }
+      }
+
+      // 4. Update password via Supabase Auth client for currently authenticated user
+      const { data: updateData, error: updateErr } = await supabase.auth.updateUser({
+        password: trimmed,
+      });
+
+      if (updateErr) {
+        return { success: false, error: updateErr.message };
+      }
+
+      if (!updateData.user) {
+        return { success: false, error: 'Supabase Auth did not return the updated user.' };
+      }
+
+      // 5. Complete password change status in profiles via secure server-side RPC
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('complete_student_password_change');
+      if (rpcErr || (rpcData && !rpcData.success)) {
+        const msg = rpcErr?.message || rpcData?.error || 'Failed to record password change status.';
+        console.error('[Auth] complete_student_password_change error:', msg);
+        return { success: false, error: msg };
+      }
+
+      // 6. Refresh cached session
+      await AuthService.getCurrentUser();
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update password.';
+      console.error('[Auth] changePassword exception:', msg);
+      return { success: false, error: msg };
+    }
+  }
+
   static async getCurrentUser(): Promise<AuthUser | null> {
     if (!isSupabaseConfigured || !supabase) {
       if (typeof localStorage !== 'undefined') {
@@ -180,7 +253,11 @@ export class AuthService {
           const user: AuthUser = {
             id: sessionData.session.user.id,
             email: sessionData.session.user.email,
-            profile,
+            profile: {
+              ...profile,
+              must_change_password: profile.role === 'admin' ? false : (profile.must_change_password ?? true),
+              password_changed_at: profile.password_changed_at || null,
+            },
           };
           if (typeof localStorage !== 'undefined') {
             localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));

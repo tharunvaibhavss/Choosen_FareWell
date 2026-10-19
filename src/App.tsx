@@ -3,6 +3,7 @@ import { Header } from './components/common/Header';
 import { LoginPage } from './components/auth/LoginPage';
 import { QuestionnairePage } from './components/questionnaire/QuestionnairePage';
 import { AdminDashboard } from './components/admin/AdminDashboard';
+import { ForcePasswordChangePage } from './components/auth/ForcePasswordChangePage';
 import { AuthService } from './services/authService';
 import { isSupabaseConfigured } from './services/supabase';
 import type { AuthUser } from './types/auth';
@@ -34,6 +35,30 @@ export const App: React.FC = () => {
     setCurrentUser(null);
   };
 
+  const handlePasswordChanged = async () => {
+    try {
+      const refreshedUser = await AuthService.getCurrentUser();
+      if (refreshedUser) {
+        setCurrentUser(refreshedUser);
+      } else {
+        setCurrentUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                profile: {
+                  ...prev.profile,
+                  must_change_password: false,
+                  password_changed_at: new Date().toISOString(),
+                },
+              }
+            : null
+        );
+      }
+    } catch (err) {
+      console.error('Error refreshing user session after password change:', err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#fcfaf6] text-[#4a1525] gap-3">
@@ -54,8 +79,29 @@ export const App: React.FC = () => {
   }
 
   const isAdmin = currentUser.profile.role === 'admin';
+  const mustChangePassword = !isAdmin && (currentUser.profile.must_change_password ?? true);
 
-  // If authenticated:
+  // If student must change their password on first login or after admin reset, block access to questionnaire
+  if (mustChangePassword) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#fcfaf6]">
+        <Header
+          user={currentUser}
+          onLogout={handleLogout}
+          isSupabaseLive={isSupabaseConfigured}
+        />
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
+          <ForcePasswordChangePage
+            user={currentUser}
+            onPasswordChanged={handlePasswordChanged}
+            onLogout={handleLogout}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // If authenticated and password status is satisfied:
   return (
     <div className={`min-h-screen flex flex-col bg-[#fcfaf6] ${!isAdmin ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
       {/* Top Header */}

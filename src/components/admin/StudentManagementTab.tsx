@@ -11,7 +11,10 @@ import {
   AlertTriangle,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  RotateCcw,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
 import { AdminService } from '../../services/adminService';
 import type { Profile, CreateStudentInput, UpdateStudentInput } from '../../types/database';
@@ -21,11 +24,13 @@ export const StudentManagementTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'DISABLED'>('ALL');
+  const [passwordFilter, setPasswordFilter] = useState<'ALL' | 'CHANGED' | 'PENDING'>('ALL');
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isResetPassOpen, setIsResetPassOpen] = useState(false);
+  const [isRequireResetOpen, setIsRequireResetOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   const [activeStudent, setActiveStudent] = useState<Profile | null>(null);
@@ -72,6 +77,11 @@ export const StudentManagementTab: React.FC = () => {
     setTimeout(() => setFeedback(null), 6000);
   };
 
+  // Filter counts
+  const totalCount = students.length;
+  const changedCount = students.filter((s) => s.must_change_password === false).length;
+  const pendingCount = students.filter((s) => s.must_change_password !== false).length;
+
   // Filtered list
   const filteredStudents = students.filter((s) => {
     const q = searchQuery.toLowerCase();
@@ -82,8 +92,12 @@ export const StudentManagementTab: React.FC = () => {
 
     if (!matchesSearch) return false;
 
-    if (statusFilter === 'ACTIVE') return s.is_active !== false;
-    if (statusFilter === 'DISABLED') return s.is_active === false;
+    if (statusFilter === 'ACTIVE' && s.is_active === false) return false;
+    if (statusFilter === 'DISABLED' && s.is_active !== false) return false;
+
+    if (passwordFilter === 'CHANGED' && s.must_change_password !== false) return false;
+    if (passwordFilter === 'PENDING' && s.must_change_password === false) return false;
+
     return true;
   });
 
@@ -199,6 +213,32 @@ export const StudentManagementTab: React.FC = () => {
     }
   };
 
+  // Open Require Password Reset Modal
+  const openRequireResetModal = (student: Profile) => {
+    setActiveStudent(student);
+    setIsRequireResetOpen(true);
+  };
+
+  const handleRequirePasswordReset = async () => {
+    if (!activeStudent) return;
+
+    setActionLoading(true);
+    const res = await AdminService.requirePasswordReset(activeStudent.id);
+    setActionLoading(false);
+
+    if (res.success) {
+      showFeedback(
+        'success',
+        `✓ Password reset requirement set for ${activeStudent.full_name} (${activeStudent.roll_number}). They must set a new password on their next login.`
+      );
+      setIsRequireResetOpen(false);
+      setActiveStudent(null);
+      loadStudents();
+    } else {
+      showFeedback('error', res.error || 'Failed to require password reset');
+    }
+  };
+
   // Open Delete Modal
   const openDeleteModal = (student: Profile) => {
     setActiveStudent(student);
@@ -261,6 +301,74 @@ export const StudentManagementTab: React.FC = () => {
         </div>
       )}
 
+      {/* Password Status Filter Views */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPasswordFilter('ALL')}
+          className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+            passwordFilter === 'ALL'
+              ? 'bg-[#581c3f] text-white shadow-md shadow-[#581c3f]/20'
+              : 'bg-white text-[#6e5f56] border border-[#ebdccb] hover:bg-[#faf5ed]'
+          }`}
+        >
+          <span>All Students</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+              passwordFilter === 'ALL'
+                ? 'bg-white/20 text-white'
+                : 'bg-[#f4ebe1] text-[#581c3f]'
+            }`}
+          >
+            {totalCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPasswordFilter('CHANGED')}
+          className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+            passwordFilter === 'CHANGED'
+              ? 'bg-emerald-700 text-white shadow-md shadow-emerald-700/20'
+              : 'bg-white text-emerald-800 border border-[#ebdccb] hover:bg-emerald-50'
+          }`}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+          <span>Password Changed</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+              passwordFilter === 'CHANGED'
+                ? 'bg-white/20 text-white'
+                : 'bg-emerald-100 text-emerald-800'
+            }`}
+          >
+            {changedCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPasswordFilter('PENDING')}
+          className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+            passwordFilter === 'PENDING'
+              ? 'bg-amber-700 text-white shadow-md shadow-amber-700/20'
+              : 'bg-white text-amber-800 border border-[#ebdccb] hover:bg-amber-50'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 text-amber-500" />
+          <span>Password Change Pending</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+              passwordFilter === 'PENDING'
+                ? 'bg-white/20 text-white'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {pendingCount}
+          </span>
+        </button>
+      </div>
+
       {/* Search & Status Filter Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/80 p-3.5 rounded-xl border border-[#ebdccb]">
         <div className="relative flex-1 max-w-sm">
@@ -285,7 +393,7 @@ export const StudentManagementTab: React.FC = () => {
                 : 'bg-white text-[#6e5f56] border border-[#ebdccb] hover:bg-[#faf5ed]'
             }`}
           >
-            All ({students.length})
+            All Accounts
           </button>
           <button
             type="button"
@@ -296,7 +404,7 @@ export const StudentManagementTab: React.FC = () => {
                 : 'bg-white text-emerald-800 border border-[#ebdccb] hover:bg-emerald-50'
             }`}
           >
-            Active ({students.filter((s) => s.is_active !== false).length})
+            Active
           </button>
           <button
             type="button"
@@ -307,7 +415,7 @@ export const StudentManagementTab: React.FC = () => {
                 : 'bg-white text-amber-800 border border-[#ebdccb] hover:bg-amber-50'
             }`}
           >
-            Disabled ({students.filter((s) => s.is_active === false).length})
+            Disabled
           </button>
         </div>
       </div>
@@ -320,26 +428,29 @@ export const StudentManagementTab: React.FC = () => {
               <th className="py-3 px-4">Roll Number</th>
               <th className="py-3 px-4">Student Name</th>
               <th className="py-3 px-4">Email Address</th>
-              <th className="py-3 px-4 text-center">Status</th>
+              <th className="py-3 px-4 text-center">Password Status</th>
+              <th className="py-3 px-4">Password Changed At</th>
+              <th className="py-3 px-4 text-center">Account Status</th>
               <th className="py-3 px-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#f2e9de] text-xs sm:text-sm">
             {loading ? (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-[#8c7e73]">
+                <td colSpan={7} className="py-8 text-center text-[#8c7e73]">
                   Loading students roster...
                 </td>
               </tr>
             ) : filteredStudents.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-[#8c7e73]">
+                <td colSpan={7} className="py-8 text-center text-[#8c7e73]">
                   No student accounts found matching your filters.
                 </td>
               </tr>
             ) : (
               filteredStudents.map((student) => {
                 const isActive = student.is_active !== false;
+                const isPasswordChanged = student.must_change_password === false;
                 return (
                   <tr key={student.id} className="hover:bg-[#faf5ed]/60 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-[#581c3f]">
@@ -352,6 +463,36 @@ export const StudentManagementTab: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 font-mono text-xs text-[#6e5f56]">
                       {student.email || '—'}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {isPasswordChanged ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Changed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      {student.password_changed_at ? (
+                        <span className="text-xs text-[#6e5f56] font-mono">
+                          {new Date(student.password_changed_at).toLocaleString('en-IN', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[#a39488] italic">
+                          Never / Pending
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <button
@@ -381,6 +522,14 @@ export const StudentManagementTab: React.FC = () => {
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
+                          onClick={() => openRequireResetModal(student)}
+                          className="p-1.5 rounded-lg text-[#695d54] hover:text-[#581c3f] hover:bg-[#faedf2] transition-colors cursor-pointer"
+                          title="Require Password Reset on next login"
+                        >
+                          <RotateCcw className="w-4 h-4 text-[#581c3f]" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => openEditModal(student)}
                           className="p-1.5 rounded-lg text-[#695d54] hover:text-[#581c3f] hover:bg-[#faedf2] transition-colors cursor-pointer"
                           title="Edit student profile"
@@ -391,7 +540,7 @@ export const StudentManagementTab: React.FC = () => {
                           type="button"
                           onClick={() => openResetPassModal(student)}
                           className="p-1.5 rounded-lg text-[#695d54] hover:text-[#c59b27] hover:bg-[#fef8e7] transition-colors cursor-pointer"
-                          title="Reset student password"
+                          title="Directly set new password"
                         >
                           <KeyRound className="w-4 h-4" />
                         </button>
@@ -721,6 +870,101 @@ export const StudentManagementTab: React.FC = () => {
                 className="px-4 py-2 text-xs font-bold text-white bg-red-700 hover:bg-red-800 rounded-xl shadow-xs"
               >
                 {actionLoading ? 'Processing...' : 'Confirm Action'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REQUIRE PASSWORD RESET CONFIRMATION MODAL */}
+      {isRequireResetOpen && activeStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-md bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setIsRequireResetOpen(false);
+                setActiveStudent(null);
+              }}
+              className="absolute top-4 right-4 text-[#8a7b70] hover:text-[#4a1525] p-1.5 rounded-lg cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-11 h-11 rounded-xl bg-[#faedf2] text-[#581c3f] flex items-center justify-center mb-3">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+
+            <h3 className="font-serif text-xl font-bold text-[#4a1525] mb-1">
+              Require Password Reset
+            </h3>
+            <p className="text-xs text-[#70645c] mb-4">
+              Require this student to set a new password on their next login.
+            </p>
+
+            {/* Student Info Card */}
+            <div className="p-3.5 rounded-xl bg-[#fdf9f3] border border-[#ebdccb] space-y-1.5 text-xs text-[#4a1525] mb-4">
+              <div>
+                <span className="text-[#8a7b70]">Student Name:</span>{' '}
+                <strong>{activeStudent.full_name}</strong>
+              </div>
+              <div>
+                <span className="text-[#8a7b70]">Roll Number:</span>{' '}
+                <strong className="font-mono text-[#581c3f]">{activeStudent.roll_number}</strong>
+              </div>
+              <div>
+                <span className="text-[#8a7b70]">Email:</span>{' '}
+                <span className="font-mono text-[#6e5f56]">{activeStudent.email || '—'}</span>
+              </div>
+              <div>
+                <span className="text-[#8a7b70]">Current Password Status:</span>{' '}
+                <span
+                  className={`font-semibold ${
+                    activeStudent.must_change_password === false
+                      ? 'text-emerald-700'
+                      : 'text-amber-700'
+                  }`}
+                >
+                  {activeStudent.must_change_password === false ? 'Changed' : 'Already Pending'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 mb-5 leading-relaxed">
+              <strong>Notice:</strong> At their next login, {activeStudent.full_name} will be blocked from accessing student features, the questionnaire, classmates page, and submission features until they successfully set a new password.
+              <br /><br />
+              <em>Existing answers, profile data, and submission records will remain completely intact.</em>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#ebdccb]">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsRequireResetOpen(false);
+                  setActiveStudent(null);
+                }}
+                disabled={actionLoading}
+                className="px-4 py-2 text-xs font-semibold text-[#6e5f56] hover:bg-[#faf5ed] rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRequirePasswordReset}
+                disabled={actionLoading}
+                className="px-4 py-2 text-xs font-bold text-white bg-[#581c3f] hover:bg-[#43132f] rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {actionLoading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Updating...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Require Password Reset</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

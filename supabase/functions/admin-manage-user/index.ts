@@ -543,6 +543,69 @@ serve(async (req: Request) => {
       );
     }
 
+    // Action F: Require Password Reset on Student
+    if (action === "require_password_change") {
+      const { studentId } = body;
+      if (!studentId) {
+        return new Response(
+          JSON.stringify({ error: "Missing required field: studentId." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Verify target student exists and is not an administrator
+      const { data: targetProfile, error: targetErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, roll_number, full_name")
+        .eq("id", studentId)
+        .single();
+
+      if (targetErr || !targetProfile) {
+        return new Response(
+          JSON.stringify({ error: "Student profile not found." }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (targetProfile.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Forbidden: Cannot require password reset on administrator accounts." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Invoke atomic RPC admin_require_password_change
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc("admin_require_password_change", {
+        p_student_id: studentId,
+      });
+
+      if (rpcErr) {
+        const { error: updateErr } = await supabaseAdmin
+          .from("profiles")
+          .update({
+            must_change_password: true,
+            password_changed_at: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", studentId);
+
+        if (updateErr) {
+          return new Response(
+            JSON.stringify({ error: `Failed to require password reset: ${updateErr.message}` }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: rpcData?.message || `Successfully required password reset for ${targetProfile.full_name} (${targetProfile.roll_number}).`,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ error: `Unknown action: ${action}` }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

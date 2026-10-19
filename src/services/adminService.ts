@@ -230,6 +230,40 @@ export class AdminService {
     }
   }
 
+  static async requirePasswordReset(studentId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
+    }
+    try {
+      // 1. Invoke secure server-side Edge function with action: 'require_password_change'
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'require_password_change',
+          studentId,
+        },
+      });
+
+      if (!error && data?.success) {
+        return { success: true };
+      }
+
+      // Fallback: If Edge function failed, call atomic secure RPC
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_require_password_change', {
+        p_student_id: studentId,
+      });
+
+      if (!rpcErr && rpcData?.success) {
+        return { success: true };
+      }
+
+      const detailedError = error ? await AdminService.parseEdgeFunctionError(error, data) : (rpcErr?.message || 'Failed to require password reset');
+      return { success: false, error: detailedError };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to require password reset';
+      return { success: false, error: msg };
+    }
+  }
+
   static async deleteStudent(id: string): Promise<{ success: boolean; error?: string; message: string; softDeleted: boolean }> {
     if (!isSupabaseConfigured || !supabase) {
       return { success: false, error: 'Database connection is not configured.', message: '', softDeleted: false };
@@ -431,7 +465,7 @@ export class AdminService {
     try {
       const { data: students, error: studErr } = await supabase
         .from('profiles')
-        .select('id, roll_number, full_name, email, is_active')
+        .select('id, roll_number, full_name, email, is_active, must_change_password, password_changed_at')
         .eq('role', 'student')
         .order('roll_number', { ascending: true });
 
@@ -480,6 +514,8 @@ export class AdminService {
           answeredCount,
           status,
           submittedAt: sub ? sub.submitted_at : null,
+          mustChangePassword: s.must_change_password ?? true,
+          passwordChangedAt: s.password_changed_at || null,
         };
       });
     } catch (err) {
