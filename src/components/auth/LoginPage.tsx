@@ -105,10 +105,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, isSupabase
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-4 mt-5">
-          {/* Roll Number / Identifier */}
+          {/* Login ID */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-[#695d54] mb-1.5">
-              Roll Number / Login Identifier
+              Login ID
             </label>
             <div className="relative">
               <User className="w-4 h-4 text-[#8a7b70] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -118,12 +118,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, isSupabase
                 autoComplete="username"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="e.g. MCA2501 or admin"
+                placeholder="Enter your Login ID"
                 className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-[#ebdccb] rounded-xl text-xs sm:text-sm text-[#4a1525] placeholder:text-[#ab9c91] focus:outline-none focus:ring-2 focus:ring-[#581c3f]/20 focus:border-[#581c3f] shadow-xs"
               />
             </div>
             <span className="text-[11px] text-[#8c7e73] mt-1 block">
-              Students enter their unique roll number (e.g. MCA2501 to MCA2560).
+              Students and administrators should enter their assigned Login ID.
             </span>
           </div>
 

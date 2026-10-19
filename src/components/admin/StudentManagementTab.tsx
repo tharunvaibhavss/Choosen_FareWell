@@ -415,8 +415,8 @@ export const StudentManagementTab: React.FC = () => {
 
       {/* CREATE STUDENT MODAL */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-md bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-md bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsCreateOpen(false)}
@@ -524,8 +524,8 @@ export const StudentManagementTab: React.FC = () => {
 
       {/* EDIT STUDENT MODAL */}
       {isEditOpen && activeStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-md bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-md bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsEditOpen(false)}
@@ -620,8 +620,8 @@ export const StudentManagementTab: React.FC = () => {
 
       {/* RESET PASSWORD MODAL */}
       {isResetPassOpen && activeStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-sm bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-sm bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsResetPassOpen(false)}
@@ -683,8 +683,8 @@ export const StudentManagementTab: React.FC = () => {
 
       {/* DELETE CONFIRMATION MODAL */}
       {isDeleteOpen && activeStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-sm bg-[#fffdfa] rounded-2xl border border-red-200 shadow-2xl p-6 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-sm bg-[#fffdfa] rounded-2xl border border-red-200 shadow-2xl p-6 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsDeleteOpen(false)}

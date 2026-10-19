@@ -10,7 +10,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ user, onLogout, isSupabaseLive }) => {
   return (
-    <header className="relative w-full bg-[#fdfcf9] border-b border-[#ebdccb] shadow-xs z-30">
+    <header className="sticky top-0 w-full bg-[#fdfcf9] border-b border-[#ebdccb] shadow-xs z-30">
       {/* Top vintage decorative tape strip */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-1.5 bg-[#d99ca5]/40 rounded-b-sm pointer-events-none" />
 

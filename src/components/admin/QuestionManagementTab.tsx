@@ -379,8 +379,8 @@ export const QuestionManagementTab: React.FC = () => {
 
       {/* CREATE QUESTION MODAL */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsCreateOpen(false)}
@@ -475,8 +475,8 @@ export const QuestionManagementTab: React.FC = () => {
 
       {/* EDIT QUESTION MODAL */}
       {isEditOpen && activeQuestion && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-[#fffdfa] rounded-2xl border border-[#ebdccb] shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsEditOpen(false)}
@@ -569,8 +569,8 @@ export const QuestionManagementTab: React.FC = () => {
 
       {/* DELETE CONFIRMATION MODAL */}
       {isDeleteOpen && activeQuestion && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="relative w-full max-w-sm bg-[#fffdfa] rounded-2xl border border-red-200 shadow-2xl p-6 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-sm bg-[#fffdfa] rounded-2xl border border-red-200 shadow-2xl p-6 max-h-[90vh] overflow-y-auto my-auto">
             <button
               type="button"
               onClick={() => setIsDeleteOpen(false)}

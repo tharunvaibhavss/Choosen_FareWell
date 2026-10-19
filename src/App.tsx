@@ -53,9 +53,11 @@ export const App: React.FC = () => {
     );
   }
 
+  const isAdmin = currentUser.profile.role === 'admin';
+
   // If authenticated:
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden flex flex-col bg-[#fcfaf6]">
+    <div className={`min-h-screen flex flex-col bg-[#fcfaf6] ${!isAdmin ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
       {/* Top Header */}
       <Header
         user={currentUser}
@@ -64,8 +66,8 @@ export const App: React.FC = () => {
       />
 
       {/* Role-based routing */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto lg:overflow-hidden">
-        {currentUser.profile.role === 'admin' ? (
+      <div className={`flex-1 flex flex-col ${isAdmin ? 'w-full' : 'min-h-0 overflow-y-auto lg:overflow-hidden'}`}>
+        {isAdmin ? (
           <AdminDashboard />
         ) : (
           <QuestionnairePage user={currentUser} />
