@@ -18,6 +18,8 @@ dist-ssr
 .env.production
 .env.staging
 *.local
+*.xlsx
+*.pdf
 
 # Temporary files
 .temp
