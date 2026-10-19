@@ -262,6 +262,49 @@ export class AdminService {
     }
   }
 
+  static async resetStudentSubmission(studentId: string): Promise<{ success: boolean; error?: string; message?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
+    }
+    try {
+      // 1. First attempt via the secure admin Edge Function
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'reset_submission',
+          studentId,
+        },
+      });
+
+      if (!error && data?.success) {
+        return {
+          success: true,
+          message: data.message || 'Submission reset successfully.',
+        };
+      }
+
+      // 2. Fallback to direct RPC call for authenticated admin
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_reset_student_submission', {
+        p_student_id: studentId,
+      });
+
+      if (!rpcErr && rpcData?.success) {
+        return {
+          success: true,
+          message: rpcData.message || 'Submission reset successfully.',
+        };
+      }
+
+      const detailedError = await AdminService.parseEdgeFunctionError(error, data);
+      return {
+        success: false,
+        error: detailedError || rpcErr?.message || 'Failed to reset student submission.',
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Reset submission failed';
+      return { success: false, error: msg };
+    }
+  }
+
   // ============================================================================
   // 2. QUESTION MANAGEMENT CRUD
   // ============================================================================

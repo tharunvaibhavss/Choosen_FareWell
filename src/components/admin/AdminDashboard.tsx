@@ -13,7 +13,10 @@ import {
   BookOpen,
   ClipboardList,
   CheckCheck,
-  ShieldCheck
+  ShieldCheck,
+  RotateCcw,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { AdminService } from '../../services/adminService';
 import { BotanicalFlower, TapeStrip } from '../common/ScrapbookDecorations';
@@ -29,6 +32,53 @@ export const AdminDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'SUBMITTED' | 'PENDING'>('ALL');
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+
+  // Reset Submission State
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [studentToReset, setStudentToReset] = useState<StudentSummaryItem | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetModalError, setResetModalError] = useState<string | null>(null);
+  const [resetNotice, setResetNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const openResetModal = (student: StudentSummaryItem) => {
+    setStudentToReset(student);
+    setResetModalError(null);
+    setResetNotice(null);
+    setIsResetModalOpen(true);
+  };
+
+  const closeResetModal = () => {
+    if (isResetting) return;
+    setIsResetModalOpen(false);
+    setStudentToReset(null);
+    setResetModalError(null);
+  };
+
+  const handleConfirmReset = async () => {
+    if (!studentToReset) return;
+    try {
+      setIsResetting(true);
+      setResetModalError(null);
+      const res = await AdminService.resetStudentSubmission(studentToReset.id);
+      if (res.success) {
+        setResetNotice({
+          type: 'success',
+          message: res.message || `✓ Submission for ${studentToReset.fullName} (${studentToReset.rollNumber}) has been reset successfully. Status updated to Pending.`,
+        });
+        setIsResetModalOpen(false);
+        setStudentToReset(null);
+        await loadData();
+        setTimeout(() => setResetNotice(null), 7000);
+      } else {
+        setResetModalError(res.error || 'Failed to reset student submission.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Reset failed';
+      setResetModalError(msg);
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -395,6 +445,23 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
+          {resetNotice && (
+            <div className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in ${
+              resetNotice.type === 'success' 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}>
+              <span>{resetNotice.message}</span>
+              <button 
+                type="button" 
+                onClick={() => setResetNotice(null)} 
+                className="text-gray-400 hover:text-gray-700 p-0.5 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <div className="relative max-w-sm mb-2">
             <Search className="w-4 h-4 text-[#8a7b70] absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -415,18 +482,19 @@ export const AdminDashboard: React.FC = () => {
                   <th className="py-3 px-4 text-center">Required Progress (59 Denominator)</th>
                   <th className="py-3 px-4 text-center">Status</th>
                   <th className="py-3 px-4 text-right">Submitted Timestamp</th>
+                  <th className="py-3 px-4 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f2e9de] text-xs sm:text-sm">
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-[#8c7e73]">
+                    <td colSpan={6} className="py-8 text-center text-[#8c7e73]">
                       Loading student submission records...
                     </td>
                   </tr>
                 ) : filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-[#8c7e73]">
+                    <td colSpan={6} className="py-8 text-center text-[#8c7e73]">
                       No students found matching your filters.
                     </td>
                   </tr>
@@ -475,6 +543,23 @@ export const AdminDashboard: React.FC = () => {
                         {student.submittedAt
                           ? new Date(student.submittedAt).toLocaleString()
                           : '—'}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {student.status === 'submitted' ? (
+                          <button
+                            type="button"
+                            onClick={() => openResetModal(student)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 hover:border-rose-300 transition-all cursor-pointer shadow-2xs active:scale-95"
+                            title={`Reset submission for ${student.fullName} (${student.rollNumber})`}
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Reset Submission</span>
+                          </button>
+                        ) : (
+                          <span className="text-xs text-[#a39488] italic select-none">
+                            —
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -562,6 +647,122 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* RESET SUBMISSION CONFIRMATION MODAL */}
+      {isResetModalOpen && studentToReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-md bg-[#fffdfa] rounded-2xl border border-rose-200 shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto animate-in fade-in zoom-in-95">
+            <button
+              type="button"
+              onClick={closeResetModal}
+              disabled={isResetting}
+              className="absolute top-4 right-4 text-[#8a7b70] hover:text-[#4a1525] p-1.5 rounded-lg cursor-pointer disabled:opacity-50 transition-colors"
+              aria-label="Close dialog"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-11 h-11 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center mb-3.5 shadow-2xs">
+              <AlertTriangle className="w-6 h-6 text-rose-600" />
+            </div>
+
+            <h3 className="font-serif text-lg sm:text-xl font-bold text-rose-950 mb-1">
+              Reset Student Submission?
+            </h3>
+            <p className="text-xs text-[#70645c] mb-4">
+              This will erase all recorded responses for this student and restore their status to Pending.
+            </p>
+
+            {/* Target Student Identity Card */}
+            <div className="p-3.5 bg-rose-50/60 rounded-xl border border-rose-100/90 mb-4 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-[#8a7b70]">Student Name:</span>
+                <span className="font-bold text-[#2d2420]">{studentToReset.fullName}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-[#8a7b70]">Roll Number:</span>
+                <span className="font-mono font-bold text-[#4a1525] bg-[#fae8ef] px-2 py-0.5 rounded border border-[#cb9fb3]">
+                  {studentToReset.rollNumber}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-[#8a7b70]">Current Answers:</span>
+                <span className="font-semibold text-emerald-800">
+                  {studentToReset.answeredCount} / 59 submitted
+                </span>
+              </div>
+              {studentToReset.submittedAt && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-[#8a7b70]">Submitted Timestamp:</span>
+                  <span className="font-mono text-2xs text-[#7d6f66]">
+                    {new Date(studentToReset.submittedAt).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Warning Callout */}
+            <div className="p-3 rounded-xl bg-amber-50/90 border border-amber-200/90 text-amber-950 text-xs mb-4 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Permanent Deletion Warning</span>
+              </div>
+              <ul className="list-disc pl-4 space-y-1 text-2xs text-[#6e5a42] leading-relaxed">
+                <li>
+                  The student’s <strong>submitted answers will be permanently deleted</strong> and cannot be restored.
+                </li>
+                <li>
+                  Their submission status will return to <strong>Pending (0/59)</strong>.
+                </li>
+                <li>
+                  The student will need to log in with their existing credentials and answer all 59 questions again from the beginning.
+                </li>
+                <li>
+                  Their login account, password, profile, and all other students’ data remain completely unaffected.
+                </li>
+              </ul>
+            </div>
+
+            {/* Error Message inside modal if failed */}
+            {resetModalError && (
+              <div className="p-3 mb-4 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-800 animate-in fade-in">
+                {resetModalError}
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#ebdccb]">
+              <button
+                type="button"
+                onClick={closeResetModal}
+                disabled={isResetting}
+                className="px-4 py-2 text-xs font-semibold text-[#6e5f56] hover:text-[#2d2420] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                disabled={isResetting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 disabled:bg-rose-400 rounded-xl shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed active:scale-95"
+              >
+                {isResetting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Resetting...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Submission</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

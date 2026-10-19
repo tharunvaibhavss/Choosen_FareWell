@@ -462,6 +462,75 @@ serve(async (req: Request) => {
       );
     }
 
+    // Action E: Reset Student Submission
+    if (action === "reset_submission") {
+      const { studentId } = body;
+      if (!studentId) {
+        return new Response(
+          JSON.stringify({ error: "Missing required field: studentId." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Verify target student exists and is not an administrator
+      const { data: targetProfile, error: targetErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, roll_number, full_name, is_active")
+        .eq("id", studentId)
+        .single();
+
+      if (targetErr || !targetProfile) {
+        return new Response(
+          JSON.stringify({ error: "Student profile not found." }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (targetProfile.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Forbidden: Cannot reset administrator accounts." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Invoke atomic RPC admin_reset_student_submission
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc("admin_reset_student_submission", {
+        p_student_id: studentId,
+      });
+
+      if (rpcErr) {
+        // Fallback: direct atomic operations with service-role client
+        const { error: subErr } = await supabaseAdmin.from("submissions").delete().eq("student_id", studentId);
+        const { error: ansErr } = await supabaseAdmin.from("answers").delete().eq("respondent_id", studentId);
+        await supabaseAdmin.from("student_question_order").update({ is_marked_for_review: false }).eq("respondent_id", studentId);
+
+        if (subErr || ansErr) {
+          return new Response(
+            JSON.stringify({ error: `Failed to reset submission: ${subErr?.message || ansErr?.message}` }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: `Successfully reset submission for ${targetProfile.full_name} (${targetProfile.roll_number}).`,
+            student: targetProfile,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: rpcData?.message || `Successfully reset submission for ${targetProfile.full_name} (${targetProfile.roll_number}).`,
+          details: rpcData,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ error: `Unknown action: ${action}` }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
