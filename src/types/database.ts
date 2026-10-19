@@ -72,6 +72,24 @@ export interface DetailedAnswerExportRow {
   answeredAt: string;
 }
 
+export interface StudentQuestionAnalysisRow {
+  selectedStudentRollNumber: string;
+  selectedStudentName: string;
+  questionText: string;
+  repetitionCount: number;
+  respondentRollNumbers: string;
+  respondentNames: string;
+}
+
+export interface StudentSelectionSummaryRow {
+  studentRollNumber: string;
+  studentName: string;
+  totalSelectionsReceived: number;
+  distinctQuestionsCount: number;
+  mostFrequentlyAssociatedQuestion: string;
+  highestQuestionRepetitionCount: number;
+}
+
 // Admin Student Management Inputs
 export interface CreateStudentInput {
   rollNumber: string;

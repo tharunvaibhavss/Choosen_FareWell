@@ -1,9 +1,12 @@
 import ExcelJS from 'exceljs';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { MockStorageService } from './mockStorage';
+import { AuthService } from './authService';
 import type { 
   StudentSummaryItem, 
   DetailedAnswerExportRow, 
+  StudentQuestionAnalysisRow,
+  StudentSelectionSummaryRow,
   Profile, 
   Question, 
   CreateStudentInput, 
@@ -11,6 +14,24 @@ import type {
   CreateQuestionInput,
   UpdateQuestionInput 
 } from '../types/database';
+
+export function parseRollNumber(roll: string | number | undefined | null): number {
+  if (typeof roll === 'number') return roll;
+  const str = String(roll || '');
+  const match = str.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+}
+
+export function formatRollValue(roll: string | number | undefined | null): number | string {
+  if (roll === undefined || roll === null) return '';
+  if (typeof roll === 'number') return roll;
+  const trimmed = String(roll).trim();
+  const num = Number(trimmed);
+  if (!isNaN(num) && String(num) === trimmed) {
+    return num;
+  }
+  return trimmed;
+}
 
 export class AdminService {
   // ============================================================================
@@ -327,58 +348,273 @@ export class AdminService {
     return MockStorageService.getAdminStudentSummaries();
   }
 
-  static async getDetailedAnswers(): Promise<DetailedAnswerExportRow[]> {
+  static async getValidatedAnalysisData(): Promise<{
+    students: Profile[];
+    questions: Question[];
+    detailedRows: DetailedAnswerExportRow[];
+    sheet3Rows: (StudentQuestionAnalysisRow & { selectedStudentId: string })[];
+    sheet4Rows: StudentSelectionSummaryRow[];
+  }> {
+    const students = await this.getAllStudents();
+    const questions = await this.getAllQuestions();
+
+    const studentsMap = new Map<string, Profile>(students.map((s) => [s.id, s]));
+    const questionsMap = new Map<string, Question>(questions.map((q) => [q.id, q]));
+
+    type RawAnswerItem = {
+      id?: string;
+      respondent_id: string;
+      question_id: string;
+      selected_student_id: string;
+      created_at?: string;
+      updated_at?: string;
+    };
+
+    let rawAnswers: RawAnswerItem[] = [];
+
     if (isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase
           .from('answers')
-          .select(`
-            created_at,
-            updated_at,
-            respondent:profiles!answers_respondent_id_fkey(roll_number, full_name),
-            question:questions!answers_question_id_fkey(question_number, question_text),
-            classmate:profiles!answers_selected_student_id_fkey(roll_number, full_name)
-          `);
+          .select('id, respondent_id, question_id, selected_student_id, created_at, updated_at');
 
-        if (!error && data) {
-          type SupabaseAnswerRow = {
-            created_at: string;
-            updated_at: string;
-            respondent: { roll_number: string; full_name: string } | null;
-            question: { question_number: number; question_text: string } | null;
-            classmate: { roll_number: string; full_name: string } | null;
-          };
-
-          return (data as unknown as SupabaseAnswerRow[]).map((row) => ({
-            respondentRollNumber: row.respondent?.roll_number || 'UNKNOWN',
-            respondentName: row.respondent?.full_name || 'Unknown Student',
-            questionNumber: row.question?.question_number || 0,
-            questionText: row.question?.question_text || '',
-            selectedClassmateRollNumber: row.classmate?.roll_number || 'UNKNOWN',
-            selectedClassmateName: row.classmate?.full_name || 'Unknown Classmate',
-            answeredAt: row.updated_at || row.created_at,
-          })).sort((a, b) => {
-            if (a.respondentRollNumber !== b.respondentRollNumber) {
-              return a.respondentRollNumber.localeCompare(b.respondentRollNumber);
-            }
-            return a.questionNumber - b.questionNumber;
-          });
+        if (!error && data && data.length > 0) {
+          rawAnswers = data as RawAnswerItem[];
         }
       } catch (err) {
-        console.warn('Supabase getDetailedAnswers error, falling back:', err);
+        console.warn('Supabase getValidatedAnalysisData answers fetch error, falling back to mock:', err);
       }
     }
 
-    return MockStorageService.getDetailedAnswersForExport();
+    if (rawAnswers.length === 0) {
+      rawAnswers = MockStorageService.getAllAnswersRaw();
+    }
+
+    // 1. Enforce strict data consistency rules:
+    // - One respondent, one original question, one selected student
+    // - Exclude self-selections (respondent_id !== selected_student_id)
+    // - Exclude duplicate answers for the same (respondent, question)
+    // - Ensure valid profile and question records exist
+    interface ValidAnswerRecord {
+      respondentId: string;
+      respondentRoll: string;
+      respondentName: string;
+      questionId: string;
+      questionNumber: number;
+      questionText: string;
+      selectedStudentId: string;
+      selectedStudentRoll: string;
+      selectedStudentName: string;
+      answeredAt: string;
+    }
+
+    const validAnswers: ValidAnswerRecord[] = [];
+    const seenRespondentQuestion = new Set<string>();
+    const seenRespondentClassmate = new Set<string>();
+
+    for (const ans of rawAnswers) {
+      if (!ans.respondent_id || !ans.question_id || !ans.selected_student_id) continue;
+      // Rule C: A respondent cannot select themselves
+      if (ans.respondent_id === ans.selected_student_id) continue;
+
+      const respondent = studentsMap.get(ans.respondent_id);
+      const selected = studentsMap.get(ans.selected_student_id);
+      const question = questionsMap.get(ans.question_id);
+
+      if (!respondent || !selected || !question) continue;
+
+      // Rule A: Unique answer per respondent per question
+      const key = `${ans.respondent_id}___${ans.question_id}`;
+      if (seenRespondentQuestion.has(key)) continue;
+
+      // Rule B: A respondent cannot select the same classmate for multiple questions
+      const classmateKey = `${ans.respondent_id}___${ans.selected_student_id}`;
+      if (seenRespondentClassmate.has(classmateKey)) continue;
+
+      seenRespondentQuestion.add(key);
+      seenRespondentClassmate.add(classmateKey);
+
+      validAnswers.push({
+        respondentId: respondent.id,
+        respondentRoll: respondent.roll_number,
+        respondentName: respondent.full_name,
+        questionId: question.id,
+        questionNumber: question.question_number,
+        questionText: question.question_text,
+        selectedStudentId: selected.id,
+        selectedStudentRoll: selected.roll_number,
+        selectedStudentName: selected.full_name,
+        answeredAt: ans.updated_at || ans.created_at || new Date().toISOString(),
+      });
+    }
+
+    // 2. Build Detailed Rows (Sheet 2)
+    const detailedRows: DetailedAnswerExportRow[] = validAnswers.map((a) => ({
+      respondentRollNumber: a.respondentRoll,
+      respondentName: a.respondentName,
+      questionNumber: a.questionNumber,
+      questionText: a.questionText,
+      selectedClassmateRollNumber: a.selectedStudentRoll,
+      selectedClassmateName: a.selectedStudentName,
+      answeredAt: a.answeredAt,
+    })).sort((a, b) => {
+      const rollDiff = parseRollNumber(a.respondentRollNumber) - parseRollNumber(b.respondentRollNumber);
+      if (rollDiff !== 0) return rollDiff;
+      return a.questionNumber - b.questionNumber;
+    });
+
+    // 3. Build Sheet 3: Student & Question Analysis
+    // Group answers by selectedStudentId and original questionId
+    const sheet3GroupMap = new Map<string, {
+      selectedStudentId: string;
+      selectedStudentRoll: string;
+      selectedStudentName: string;
+      questionId: string;
+      questionText: string;
+      respondentsMap: Map<string, { rollNumber: string; fullName: string }>;
+    }>();
+
+    for (const ans of validAnswers) {
+      const gKey = `${ans.selectedStudentId}___${ans.questionId}`;
+      let group = sheet3GroupMap.get(gKey);
+      if (!group) {
+        group = {
+          selectedStudentId: ans.selectedStudentId,
+          selectedStudentRoll: ans.selectedStudentRoll,
+          selectedStudentName: ans.selectedStudentName,
+          questionId: ans.questionId,
+          questionText: ans.questionText,
+          respondentsMap: new Map(),
+        };
+        sheet3GroupMap.set(gKey, group);
+      }
+      group.respondentsMap.set(ans.respondentId, {
+        rollNumber: ans.respondentRoll,
+        fullName: ans.respondentName,
+      });
+    }
+
+    const sheet3Rows: (StudentQuestionAnalysisRow & { selectedStudentId: string })[] = [];
+
+    for (const group of sheet3GroupMap.values()) {
+      // 4. Sort the respondent roll numbers numerically in ascending order.
+      // 5. Keep respondent names in the corresponding order of their roll numbers.
+      const sortedRespondents = Array.from(group.respondentsMap.values()).sort((a, b) => {
+        const numA = parseRollNumber(a.rollNumber);
+        const numB = parseRollNumber(b.rollNumber);
+        if (numA !== numB) return numA - numB;
+        return a.rollNumber.localeCompare(b.rollNumber);
+      });
+
+      sheet3Rows.push({
+        selectedStudentId: group.selectedStudentId,
+        selectedStudentRollNumber: group.selectedStudentRoll,
+        selectedStudentName: group.selectedStudentName,
+        questionText: group.questionText,
+        repetitionCount: sortedRespondents.length,
+        respondentRollNumbers: sortedRespondents.map((r) => r.rollNumber).join(', '),
+        respondentNames: sortedRespondents.map((r) => r.fullName).join(', '),
+      });
+    }
+
+    // Sort Sheet 3 rows:
+    // 1. Sort selected student names alphabetically in ascending order, A to Z.
+    // 2. Within each selected student, sort questions by Repetition Count in descending order, highest to lowest.
+    // 3. If two questions have the same count, sort their question text alphabetically.
+    sheet3Rows.sort((a, b) => {
+      const nameComp = a.selectedStudentName.localeCompare(b.selectedStudentName);
+      if (nameComp !== 0) return nameComp;
+
+      const rollComp = parseRollNumber(a.selectedStudentRollNumber) - parseRollNumber(b.selectedStudentRollNumber);
+      if (rollComp !== 0) return rollComp;
+
+      if (b.repetitionCount !== a.repetitionCount) {
+        return b.repetitionCount - a.repetitionCount;
+      }
+
+      return a.questionText.localeCompare(b.questionText);
+    });
+
+    // 4. Build Sheet 4: Student Selection Summary
+    // Sourced from all 60 students, sorted numerically by roll number
+    const studentSheet3Map = new Map<string, typeof sheet3Rows>();
+    for (const row of sheet3Rows) {
+      const list = studentSheet3Map.get(row.selectedStudentId) || [];
+      list.push(row);
+      studentSheet3Map.set(row.selectedStudentId, list);
+    }
+
+    // Sort students by roll number numerically in ascending order (e.g. 1, 2, ... 60)
+    const sortedStudents = [...students].sort((a, b) => {
+      const numA = parseRollNumber(a.roll_number);
+      const numB = parseRollNumber(b.roll_number);
+      if (numA !== numB) return numA - numB;
+      return a.roll_number.localeCompare(b.roll_number);
+    });
+
+    const sheet4Rows: StudentSelectionSummaryRow[] = sortedStudents.map((student) => {
+      const qRows = studentSheet3Map.get(student.id) || [];
+
+      if (qRows.length === 0) {
+        return {
+          studentRollNumber: student.roll_number,
+          studentName: student.full_name,
+          totalSelectionsReceived: 0,
+          distinctQuestionsCount: 0,
+          mostFrequentlyAssociatedQuestion: '',
+          highestQuestionRepetitionCount: 0,
+        };
+      }
+
+      // Explicitly sort qRows for this student: highest repetition count first; tie-break alphabetically by question text
+      const sortedQRows = [...qRows].sort((a, b) => {
+        if (b.repetitionCount !== a.repetitionCount) {
+          return b.repetitionCount - a.repetitionCount;
+        }
+        return a.questionText.localeCompare(b.questionText);
+      });
+
+      const totalSelections = sortedQRows.reduce((sum, r) => sum + r.repetitionCount, 0);
+      const distinctQuestions = sortedQRows.length;
+      const topQuestion = sortedQRows[0];
+
+      return {
+        studentRollNumber: student.roll_number,
+        studentName: student.full_name,
+        totalSelectionsReceived: totalSelections,
+        distinctQuestionsCount: distinctQuestions,
+        mostFrequentlyAssociatedQuestion: topQuestion.questionText,
+        highestQuestionRepetitionCount: topQuestion.repetitionCount,
+      };
+    });
+
+    return {
+      students,
+      questions,
+      detailedRows,
+      sheet3Rows,
+      sheet4Rows,
+    };
+  }
+
+  static async getDetailedAnswers(): Promise<DetailedAnswerExportRow[]> {
+    const analysis = await this.getValidatedAnalysisData();
+    return analysis.detailedRows;
   }
 
   // ============================================================================
-  // 4. EXCELJS EXPORT (.XLSX) WITH 59 DENOMINATOR
+  // 4. EXCELJS EXPORT (.XLSX) WITH EXACTLY 4 SHEETS
   // ============================================================================
 
   static async exportToExcel(): Promise<void> {
+    const currentUser = await AuthService.getCurrentUser();
+    if (!currentUser || currentUser.profile.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are permitted to export yearbook submissions.');
+    }
+
     const summaries = await this.getStudentSummaries();
-    const detailed = await this.getDetailedAnswers();
+    const analysisData = await this.getValidatedAnalysisData();
+    const detailed = analysisData.detailedRows;
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'MCA Memories 2025–2027 Yearbook System';
@@ -386,9 +622,11 @@ export class AdminService {
     workbook.created = new Date();
     workbook.modified = new Date();
 
-    // SHEET 1: SUBMISSIONS SUMMARY
+    // =========================================================================
+    // SHEET 1: Summary Report
+    // =========================================================================
     const summarySheet = workbook.addWorksheet('Summary Report', {
-      views: [{ showGridLines: true }],
+      views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
       properties: { tabColor: { argb: 'FF581C3F' } },
     });
 
@@ -428,7 +666,7 @@ export class AdminService {
       { key: 'rollNumber', width: 16 },
       { key: 'fullName', width: 30 },
       { key: 'accountStatus', width: 16 },
-      { key: 'answeredCount', width: 26 },
+      { key: 'answeredCount', width: 28 },
       { key: 'status', width: 20 },
       { key: 'submittedAt', width: 26 },
     ];
@@ -508,9 +746,13 @@ export class AdminService {
       });
     });
 
-    // SHEET 2: DETAILED MEMORY ANSWERS
-    const detailSheet = workbook.addWorksheet('Detailed Answers', {
-      views: [{ showGridLines: true }],
+    summarySheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + summaries.length), column: 6 } };
+
+    // =========================================================================
+    // SHEET 2: Detailed Memory Responses
+    // =========================================================================
+    const detailSheet = workbook.addWorksheet('Detailed Memory Responses', {
+      views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
       properties: { tabColor: { argb: 'FFC59B27' } },
     });
 
@@ -613,6 +855,261 @@ export class AdminService {
       });
     }
 
+    detailSheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + detailed.length), column: 7 } };
+
+    // =========================================================================
+    // SHEET 3: Student & Question Analysis
+    // =========================================================================
+    const sheet3 = workbook.addWorksheet('Student & Question Analysis', {
+      views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
+      properties: { tabColor: { argb: 'FF87426A' } },
+    });
+
+    sheet3.mergeCells('A1:F1');
+    const s3Title = sheet3.getCell('A1');
+    s3Title.value = 'MCA MEMORIES 2025–2027 • STUDENT & QUESTION ANALYSIS';
+    s3Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    s3Title.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF581C3F' },
+    };
+    s3Title.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet3.getRow(1).height = 36;
+
+    sheet3.mergeCells('A2:F2');
+    const s3Sub = sheet3.getCell('A2');
+    s3Sub.value = `Repetition Analysis of Student Nominations • ${analysisData.sheet3Rows.length} Distinct Student-Question Combinations • Exported on ${new Date().toLocaleString()}`;
+    s3Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
+    s3Sub.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet3.getRow(2).height = 22;
+
+    sheet3.getRow(4).values = [
+      'Selected Student Roll Number',
+      'Selected Student Name',
+      'Question Text',
+      'Repetition Count',
+      'Selected By: Respondent Roll Numbers',
+      'Selected By: Respondent Names',
+    ];
+
+    sheet3.columns = [
+      { key: 'selectedRoll', width: 22 },
+      { key: 'selectedName', width: 28 },
+      { key: 'questionText', width: 55 },
+      { key: 'repetitionCount', width: 18 },
+      { key: 'respondentRolls', width: 36 },
+      { key: 'respondentNames', width: 45 },
+    ];
+
+    const s3HeaderRow = sheet3.getRow(4);
+    s3HeaderRow.height = 26;
+    s3HeaderRow.eachCell((cell) => {
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF581C3F' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD99CA5' } },
+        bottom: { style: 'medium', color: { argb: 'FF42112D' } },
+      };
+    });
+
+    if (analysisData.sheet3Rows.length === 0) {
+      const emptyRow = sheet3.getRow(5);
+      emptyRow.values = ['No student nominations recorded yet.', '', '', 0, '', ''];
+      emptyRow.height = 28;
+      emptyRow.getCell(1).font = { italic: true, color: { argb: 'FF888888' } };
+    } else {
+      analysisData.sheet3Rows.forEach((item, idx) => {
+        const rowIndex = 5 + idx;
+        const row = sheet3.getRow(rowIndex);
+        const rollVal = formatRollValue(item.selectedStudentRollNumber);
+
+        row.values = [
+          rollVal,
+          item.selectedStudentName,
+          item.questionText,
+          item.repetitionCount,
+          item.respondentRollNumbers,
+          item.respondentNames,
+        ];
+
+        row.height = 26;
+        const isEven = idx % 2 === 0;
+        const bgColor = isEven ? 'FFFFFFFF' : 'FFFDF8F5';
+
+        row.eachCell((cell, colNumber) => {
+          cell.font = { name: 'Calibri', size: 10 };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: bgColor },
+          };
+          cell.border = {
+            bottom: { style: 'thin', color: { argb: 'FFE6D5D8' } },
+            right: { style: 'thin', color: { argb: 'FFE6D5D8' } },
+            left: { style: 'thin', color: { argb: 'FFE6D5D8' } },
+          };
+
+          if (colNumber === 1) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            if (typeof rollVal === 'number') {
+              cell.numFmt = '0';
+            }
+          } else if (colNumber === 4) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            cell.numFmt = '#,##0';
+            // Subtle conditional highlight for higher repetition counts
+            if (item.repetitionCount >= 5) {
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFF5E6EC' },
+              };
+              cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF581C3F' } };
+            } else if (item.repetitionCount >= 2) {
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFFAF2F5' },
+              };
+              cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF732A54' } };
+            }
+          } else {
+            cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: colNumber === 3 || colNumber === 5 || colNumber === 6 };
+          }
+        });
+      });
+    }
+
+    const s3LastRow = Math.max(5, 4 + analysisData.sheet3Rows.length);
+    sheet3.autoFilter = { from: { row: 4, column: 1 }, to: { row: s3LastRow, column: 6 } };
+
+    // =========================================================================
+    // SHEET 4: Student Selection Summary
+    // =========================================================================
+    const sheet4 = workbook.addWorksheet('Student Selection Summary', {
+      views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
+      properties: { tabColor: { argb: 'FF4A1525' } },
+    });
+
+    sheet4.mergeCells('A1:F1');
+    const s4Title = sheet4.getCell('A1');
+    s4Title.value = 'MCA MEMORIES 2025–2027 • STUDENT SELECTION SUMMARY';
+    s4Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    s4Title.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4A1525' },
+    };
+    s4Title.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet4.getRow(1).height = 36;
+
+    sheet4.mergeCells('A2:F2');
+    const s4Sub = sheet4.getCell('A2');
+    s4Sub.value = `Comprehensive Selection Totals Across All ${analysisData.sheet4Rows.length} Students • Sorted by Roll Number Numerically • Exported on ${new Date().toLocaleString()}`;
+    s4Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
+    s4Sub.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet4.getRow(2).height = 22;
+
+    sheet4.getRow(4).values = [
+      'Student Roll Number',
+      'Student Name',
+      'Total Selections Received',
+      'Number of Distinct Questions',
+      'Most Frequently Associated Question',
+      'Highest Question Repetition Count',
+    ];
+
+    sheet4.columns = [
+      { key: 'studentRoll', width: 20 },
+      { key: 'studentName', width: 28 },
+      { key: 'totalSelections', width: 24 },
+      { key: 'distinctQuestions', width: 26 },
+      { key: 'mostFrequentQuestion', width: 55 },
+      { key: 'highestCount', width: 30 },
+    ];
+
+    const s4HeaderRow = sheet4.getRow(4);
+    s4HeaderRow.height = 26;
+    s4HeaderRow.eachCell((cell) => {
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF4A1525' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD99CA5' } },
+        bottom: { style: 'medium', color: { argb: 'FF2A0D15' } },
+      };
+    });
+
+    analysisData.sheet4Rows.forEach((item, idx) => {
+      const rowIndex = 5 + idx;
+      const row = sheet4.getRow(rowIndex);
+      const rollVal = formatRollValue(item.studentRollNumber);
+
+      row.values = [
+        rollVal,
+        item.studentName,
+        item.totalSelectionsReceived,
+        item.distinctQuestionsCount,
+        item.mostFrequentlyAssociatedQuestion,
+        item.highestQuestionRepetitionCount,
+      ];
+
+      row.height = 24;
+      const isEven = idx % 2 === 0;
+      const bgColor = isEven ? 'FFFFFFFF' : 'FFFDF8F5';
+
+      row.eachCell((cell, colNumber) => {
+        cell.font = { name: 'Calibri', size: 10 };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: bgColor },
+        };
+        cell.border = {
+          bottom: { style: 'thin', color: { argb: 'FFE6D5D8' } },
+          right: { style: 'thin', color: { argb: 'FFE6D5D8' } },
+          left: { style: 'thin', color: { argb: 'FFE6D5D8' } },
+        };
+
+        if (colNumber === 1) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          if (typeof rollVal === 'number') {
+            cell.numFmt = '0';
+          }
+        } else if (colNumber === 3 || colNumber === 4 || colNumber === 6) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          cell.numFmt = '#,##0';
+          if (colNumber === 3 && item.totalSelectionsReceived >= 10) {
+            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF581C3F' } };
+          }
+          if (colNumber === 6 && item.highestQuestionRepetitionCount >= 5) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFF5E6EC' },
+            };
+            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF581C3F' } };
+          }
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: colNumber === 5 };
+        }
+      });
+    });
+
+    const s4LastDataRow = 4 + analysisData.sheet4Rows.length;
+    sheet4.autoFilter = { from: { row: 4, column: 1 }, to: { row: s4LastDataRow, column: 6 } };
+
+    // Write buffer and trigger browser download
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

@@ -520,14 +520,14 @@ export const AdminDashboard: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-4 rounded-xl bg-[#faedf2] border border-[#eed5da]">
               <div className="flex items-center gap-2 text-[#581c3f] font-bold text-sm mb-1">
-                <CheckCheck className="w-4 h-4" />
+                <CheckCheck className="w-4 h-4 text-[#581c3f]" />
                 <span>Sheet 1: Summary Report</span>
               </div>
               <p className="text-xs text-[#70645c] leading-relaxed">
-                Contains all {summaries.length} student profiles with their unique roll numbers, full names, active account status, answered counts (evaluated out of 59 required), and submission timestamps.
+                Contains all {summaries.length} student profiles with their unique roll numbers, full names, active account status, answered counts (out of 59 required), and submission timestamps.
               </p>
             </div>
 
@@ -537,7 +537,27 @@ export const AdminDashboard: React.FC = () => {
                 <span>Sheet 2: Detailed Memory Responses</span>
               </div>
               <p className="text-xs text-[#70645c] leading-relaxed">
-                Contains every granular answer recorded: Respondent Roll Number & Name, Question Number, Memory Prompt Text, Selected Classmate Roll Number & Name, and Timestamp.
+                Contains every granular answer recorded: Respondent Roll & Name, Question Number, Memory Prompt Text, Selected Classmate Roll & Name, and Timestamp.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-[#f5eef4] border border-[#d9b8cc]">
+              <div className="flex items-center gap-2 text-[#581c3f] font-bold text-sm mb-1">
+                <CheckCheck className="w-4 h-4 text-[#581c3f]" />
+                <span>Sheet 3: Student & Question Analysis</span>
+              </div>
+              <p className="text-xs text-[#70645c] leading-relaxed">
+                Repetition breakdown showing which classmates were selected for each question, repetition frequency, and numerically sorted lists of respondent roll numbers and names.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-[#f9f1f4] border border-[#cb9fb3]">
+              <div className="flex items-center gap-2 text-[#4a1525] font-bold text-sm mb-1">
+                <CheckCheck className="w-4 h-4 text-[#4a1525]" />
+                <span>Sheet 4: Student Selection Summary</span>
+              </div>
+              <p className="text-xs text-[#70645c] leading-relaxed">
+                Full summary across all 60 students in numerical roll order: total selections received, distinct questions count, top associated question, and highest repetition count.
               </p>
             </div>
           </div>
