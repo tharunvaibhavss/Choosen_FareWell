@@ -511,6 +511,18 @@ serve(async (req: Request) => {
           );
         }
 
+        await supabaseAdmin.from("profiles").update({
+          first_login_reset_completed: true,
+          first_login_reset_at: new Date().toISOString(),
+        }).eq("id", studentId);
+
+        await supabaseAdmin.from("student_one_time_resets").upsert({
+          student_id: studentId,
+          reset_completed: true,
+          reset_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
         return new Response(
           JSON.stringify({
             success: true,

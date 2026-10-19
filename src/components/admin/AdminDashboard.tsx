@@ -63,7 +63,7 @@ export const AdminDashboard: React.FC = () => {
       if (res.success) {
         setResetNotice({
           type: 'success',
-          message: res.message || `✓ Submission for ${studentToReset.fullName} (${studentToReset.rollNumber}) has been reset successfully. Status updated to Pending.`,
+          message: res.message || `✓ Submission and saved answers for ${studentToReset.fullName} (${studentToReset.rollNumber}) have been reset successfully. Status updated to Pending (0/59).`,
         });
         setIsResetModalOpen(false);
         setStudentToReset(null);
@@ -545,12 +545,12 @@ export const AdminDashboard: React.FC = () => {
                           : '—'}
                       </td>
                       <td className="py-3 px-4 text-center">
-                        {student.status === 'submitted' ? (
+                        {student.status === 'submitted' || student.status === 'in_progress' ? (
                           <button
                             type="button"
                             onClick={() => openResetModal(student)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 hover:border-rose-300 transition-all cursor-pointer shadow-2xs active:scale-95"
-                            title={`Reset submission for ${student.fullName} (${student.rollNumber})`}
+                            title={`Reset submission and saved answers for ${student.fullName} (${student.rollNumber})`}
                           >
                             <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
                             <span>Reset Submission</span>
@@ -667,10 +667,10 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <h3 className="font-serif text-lg sm:text-xl font-bold text-rose-950 mb-1">
-              Reset Student Submission?
+              Reset Student Submission & Answers?
             </h3>
             <p className="text-xs text-[#70645c] mb-4">
-              This will erase all recorded responses for this student and restore their status to Pending.
+              This will clear all saved answers and questionnaire progress for this student and restore their status to Pending.
             </p>
 
             {/* Target Student Identity Card */}
@@ -686,9 +686,15 @@ export const AdminDashboard: React.FC = () => {
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-[#8a7b70]">Current Answers:</span>
+                <span className="font-medium text-[#8a7b70]">Submission Status:</span>
+                <span className="font-bold text-[#2d2420]">
+                  {studentToReset.status === 'submitted' ? 'Submitted' : 'In Progress'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-[#8a7b70]">Recorded Answers:</span>
                 <span className="font-semibold text-emerald-800">
-                  {studentToReset.answeredCount} / 59 submitted
+                  {studentToReset.answeredCount} / 59 {studentToReset.status === 'submitted' ? 'submitted' : 'answers saved'}
                 </span>
               </div>
               {studentToReset.submittedAt && (
@@ -705,20 +711,20 @@ export const AdminDashboard: React.FC = () => {
             <div className="p-3 rounded-xl bg-amber-50/90 border border-amber-200/90 text-amber-950 text-xs mb-4 space-y-1.5">
               <div className="flex items-center gap-1.5 font-bold text-amber-900">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Permanent Deletion Warning</span>
+                <span>Permanent Reset Warning</span>
               </div>
               <ul className="list-disc pl-4 space-y-1 text-2xs text-[#6e5a42] leading-relaxed">
                 <li>
-                  The student’s <strong>submitted answers will be permanently deleted</strong> and cannot be restored.
+                  All <strong>saved answers and submission progress will be permanently deleted</strong> and cannot be restored.
                 </li>
                 <li>
-                  Their submission status will return to <strong>Pending (0/59)</strong>.
+                  Their status will return to <strong>Pending (0/59)</strong> immediately.
                 </li>
                 <li>
-                  The student will need to log in with their existing credentials and answer all 59 questions again from the beginning.
+                  The student’s next login will open the questionnaire from the beginning, allowing them to fill all questions fresh.
                 </li>
                 <li>
-                  Their login account, password, profile, and all other students’ data remain completely unaffected.
+                  Their login account, password, profile, other students’ data, and the 72-question bank remain completely unaffected.
                 </li>
               </ul>
             </div>
