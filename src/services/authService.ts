@@ -10,7 +10,7 @@ export class AuthService {
       return clean;
     }
     if (clean === 'admin' || clean === 'admin01') {
-      return 'admin@mca2527.college';
+      return 'admin@mcafarewell';
     }
     // Student roll number e.g. mca2501 -> mca2501@mca2527.college
     return `${clean}@mca2527.college`;

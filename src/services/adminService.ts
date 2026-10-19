@@ -59,6 +59,37 @@ export class AdminService {
     }
   }
 
+  private static async parseEdgeFunctionError(error: any, data: any): Promise<string> {
+    if (data?.error && typeof data.error === 'string') {
+      return data.error;
+    }
+    if (error && typeof error === 'object' && 'context' in error) {
+      try {
+        const ctx = (error as { context?: Response }).context;
+        if (ctx && typeof ctx.json === 'function') {
+          const parsed = ctx.clone ? await ctx.clone().json() : await ctx.json();
+          if (parsed?.error && typeof parsed.error === 'string') {
+            return parsed.error;
+          }
+          if (parsed?.message && typeof parsed.message === 'string') {
+            return parsed.message;
+          }
+        }
+      } catch {
+        try {
+          const ctx = (error as { context?: Response }).context;
+          const text = ctx?.clone ? await ctx.clone().text() : await ctx?.text();
+          if (text && typeof text === 'string' && text.length < 200) {
+            return text;
+          }
+        } catch {
+          // Ignore parse failure
+        }
+      }
+    }
+    return error?.message || 'Edge function request failed';
+  }
+
   static async createStudent(input: CreateStudentInput): Promise<{ success: boolean; error?: string; student?: Profile }> {
     if (!isSupabaseConfigured || !supabase) {
       return { success: false, error: 'Database connection is not configured.' };
@@ -82,10 +113,10 @@ export class AdminService {
       });
 
       if (error) {
-        const detailedError = data?.error || error.message;
+        const detailedError = await AdminService.parseEdgeFunctionError(error, data);
         return {
           success: false,
-          error: `Edge function 'admin-manage-user' error: ${detailedError}. If the Edge Function is not yet deployed, please provision student accounts using the secure local script: 'npx tsx scripts/provision_accounts.ts'.`,
+          error: detailedError,
         };
       }
 
@@ -171,7 +202,12 @@ export class AdminService {
         return { success: true };
       }
 
-      // 2. If Edge function is not deployed or fails, trigger password reset email via Supabase Auth
+      if (error) {
+        const detailedError = await AdminService.parseEdgeFunctionError(error, data);
+        return { success: false, error: detailedError };
+      }
+
+      // 2. If student profile lookup is needed as fallback
       const { data: student, error: fetchErr } = await supabase
         .from('profiles')
         .select('email')
@@ -179,7 +215,7 @@ export class AdminService {
         .single();
 
       if (fetchErr || !student?.email) {
-        return { success: false, error: data?.error || error?.message || 'Could not find student email address.' };
+        return { success: false, error: 'Could not find student email address.' };
       }
 
       const { error: resetErr } = await supabase.auth.resetPasswordForEmail(student.email);
