@@ -175,8 +175,10 @@ export const StudentManagementTab: React.FC = () => {
 
   // Toggle active status directly
   const handleToggleStatus = async (student: Profile) => {
+    setActionLoading(true);
     const nextStatus = !(student.is_active !== false);
     const res = await AdminService.toggleStudentStatus(student.id, nextStatus);
+    setActionLoading(false);
 
     if (res.success) {
       showFeedback(
@@ -497,8 +499,9 @@ export const StudentManagementTab: React.FC = () => {
                     <td className="py-3 px-4 text-center">
                       <button
                         type="button"
+                        disabled={actionLoading}
                         onClick={() => handleToggleStatus(student)}
-                        className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full cursor-pointer transition-all ${
+                        className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                           isActive
                             ? 'text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100'
                             : 'text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100'

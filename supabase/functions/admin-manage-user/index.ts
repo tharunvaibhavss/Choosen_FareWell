@@ -374,8 +374,95 @@ serve(async (req: Request) => {
         );
       }
 
+      // Synchronize Auth user ban status if active status changed
+      if (activeStatus !== targetProfile.is_active) {
+        const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(studentId, {
+          ban_duration: activeStatus ? "none" : "876000h",
+        });
+        if (banErr) {
+          console.warn(`[update_student] Warning: Auth ban update failed for ${studentId}:`, banErr.message);
+        }
+      }
+
       return new Response(
         JSON.stringify({ success: true, student: updatedProfile }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Action C.5: Toggle Student Active/Inactive Status
+    if (action === "toggle_student_status") {
+      const { studentId, isActive } = body;
+      if (!studentId || isActive === undefined) {
+        return new Response(
+          JSON.stringify({ error: "Missing required fields: studentId, isActive." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const activeBool = Boolean(isActive);
+
+      const { data: targetProfile, error: targetErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, roll_number, full_name, email, is_active")
+        .eq("id", studentId)
+        .single();
+
+      if (targetErr || !targetProfile) {
+        return new Response(
+          JSON.stringify({ error: "Student profile not found." }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (targetProfile.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Forbidden: Cannot deactivate administrator accounts." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 1. Synchronize Supabase Auth user ban status
+      const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(studentId, {
+        ban_duration: activeBool ? "none" : "876000h",
+      });
+
+      if (authErr) {
+        return new Response(
+          JSON.stringify({ error: `Failed to update Auth status: ${authErr.message}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 2. Update public.profiles
+      const { data: updatedProfile, error: profErr } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          is_active: activeBool,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", studentId)
+        .select()
+        .single();
+
+      if (profErr) {
+        // Rollback Auth ban status if profile update failed
+        await supabaseAdmin.auth.admin.updateUserById(studentId, {
+          ban_duration: targetProfile.is_active ? "none" : "876000h",
+        });
+        return new Response(
+          JSON.stringify({ error: `Failed to update profile active status: ${profErr.message}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          isActive: activeBool,
+          student: updatedProfile,
+          message: `Student ${targetProfile.full_name} (${targetProfile.roll_number}) is now ${activeBool ? 'Active' : 'Disabled'}.`,
+        }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

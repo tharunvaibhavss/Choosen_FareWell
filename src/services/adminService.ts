@@ -172,13 +172,24 @@ export class AdminService {
       return { success: false, error: 'Database connection is not configured.' };
     }
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_active: isActive, updated_at: new Date().toISOString() })
-        .eq('id', id);
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'toggle_student_status',
+          studentId: id,
+          isActive,
+        },
+      });
 
-      if (error) return { success: false, error: error.message };
-      return { success: true };
+      if (!error && data?.success) {
+        return { success: true };
+      }
+
+      if (error) {
+        const detailedError = await AdminService.parseEdgeFunctionError(error, data);
+        return { success: false, error: detailedError };
+      }
+
+      return { success: false, error: data?.error || 'Failed to toggle student status' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to toggle status';
       return { success: false, error: msg };

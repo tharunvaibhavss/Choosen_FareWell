@@ -72,9 +72,12 @@ export class AuthService {
 
       if (authErr) {
         console.warn(`[Auth Stage 2] Supabase Auth sign-in rejected for '${email}':`, authErr.message);
-        const userFacingError = authErr.message.includes('Invalid login credentials')
-          ? 'Invalid login credentials. Please check your password.'
-          : authErr.message;
+        let userFacingError = authErr.message;
+        if (authErr.message.includes('Invalid login credentials')) {
+          userFacingError = 'Invalid login credentials. Please check your password.';
+        } else if (authErr.message.toLowerCase().includes('banned')) {
+          userFacingError = 'Your account has been deactivated. Please contact the administrator.';
+        }
         return { user: null, error: userFacingError };
       }
 
