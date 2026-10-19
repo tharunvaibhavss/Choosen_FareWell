@@ -4,16 +4,36 @@ import type { AuthUser, LoginParams } from '../types/auth';
 const SESSION_STORAGE_KEY = 'mca_auth_session';
 
 export class AuthService {
-  static normalizeToEmail(identifier: string): string {
-    const clean = identifier.trim().toLowerCase();
+  static async resolveLoginEmail(identifier: string): Promise<string | null> {
+    const clean = identifier.trim();
+    if (!clean) return null;
+
     if (clean.includes('@')) {
-      return clean;
+      return clean.toLowerCase();
     }
-    if (clean === 'admin' || clean === 'admin01' || clean === 'administrator') {
+
+    const lower = clean.toLowerCase();
+    if (lower === 'admin' || lower === 'admin01' || lower === 'administrator') {
       return 'admin@mcafarewell';
     }
-    // Student roll number e.g. mca2501 -> mca2501@mca2527.college
-    return `${clean}@mca2527.college`;
+
+    if (!isSupabaseConfigured || !supabase) {
+      return null;
+    }
+
+    try {
+      const { data: canonicalEmail, error: rpcErr } = await supabase.rpc('get_login_email_for_roll', {
+        p_roll_number: clean.toUpperCase(),
+      });
+
+      if (!rpcErr && canonicalEmail && typeof canonicalEmail === 'string') {
+        return canonicalEmail.trim().toLowerCase();
+      }
+    } catch (err) {
+      console.warn('[Auth] Error querying canonical email for roll number:', err);
+    }
+
+    return null;
   }
 
   static async login(params: LoginParams): Promise<{ user: AuthUser | null; error: string | null }> {
@@ -35,8 +55,15 @@ export class AuthService {
     }
 
     try {
-      const email = this.normalizeToEmail(cleanId);
-      console.log(`[Auth Stage 1] Identifier '${cleanId}' resolved to email '${email}'. Attempting sign-in...`);
+      const email = await this.resolveLoginEmail(cleanId);
+      if (!email) {
+        return { 
+          user: null, 
+          error: `No active account found for '${cleanId}'. Please verify your Roll Number or Admin ID.` 
+        };
+      }
+
+      console.log(`[Auth Stage 1] Identifier '${cleanId}' resolved to canonical email '${email}'. Attempting sign-in...`);
 
       const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
         email,
@@ -45,7 +72,10 @@ export class AuthService {
 
       if (authErr) {
         console.warn(`[Auth Stage 2] Supabase Auth sign-in rejected for '${email}':`, authErr.message);
-        return { user: null, error: authErr.message };
+        const userFacingError = authErr.message.includes('Invalid login credentials')
+          ? 'Invalid login credentials. Please check your password.'
+          : authErr.message;
+        return { user: null, error: userFacingError };
       }
 
       if (!authData.user) {
@@ -53,7 +83,7 @@ export class AuthService {
         return { user: null, error: 'User authentication failed.' };
       }
 
-      console.log(`[Auth Stage 3] Supabase Auth succeeded (UID: ${authData.user.id}). Fetching profile from database...`);
+      console.log(`[Auth Stage 3] Supabase Auth succeeded. Fetching verified profile for UID ${authData.user.id}...`);
 
       // Fetch verified profile from profiles table (Server-side trusted source)
       const { data: profile, error: profileErr } = await supabase

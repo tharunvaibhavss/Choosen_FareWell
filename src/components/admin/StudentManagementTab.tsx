@@ -92,7 +92,12 @@ export const StudentManagementTab: React.FC = () => {
     e.preventDefault();
     setActionLoading(true);
 
-    const emailToSave = newEmail.trim() || `${newRoll.trim().toLowerCase()}@mca2527.college`;
+    const emailToSave = newEmail.trim();
+    if (!emailToSave) {
+      showFeedback('error', 'Please provide a valid email address.');
+      setActionLoading(false);
+      return;
+    }
 
     const input: CreateStudentInput = {
       rollNumber: newRoll.trim().toUpperCase(),
@@ -123,7 +128,7 @@ export const StudentManagementTab: React.FC = () => {
     setActiveStudent(student);
     setEditRoll(student.roll_number);
     setEditName(student.full_name);
-    setEditEmail(student.email || `${student.roll_number.toLowerCase()}@mca2527.college`);
+    setEditEmail(student.email || '');
     setEditIsActive(student.is_active !== false);
     setIsEditOpen(true);
   };
@@ -346,7 +351,7 @@ export const StudentManagementTab: React.FC = () => {
                       </div>
                     </td>
                     <td className="py-3 px-4 font-mono text-xs text-[#6e5f56]">
-                      {student.email || `${student.roll_number.toLowerCase()}@mca2527.college`}
+                      {student.email || '—'}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <button
@@ -463,7 +468,7 @@ export const StudentManagementTab: React.FC = () => {
                 <input
                   type="email"
                   required
-                  placeholder="e.g. mca2561@mca2527.college"
+                  placeholder="e.g. 25mca001@mcafarewell.com"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-[#ebdccb] rounded-xl text-xs sm:text-sm text-[#4a1525] focus:outline-none focus:ring-2 focus:ring-[#581c3f]/20 font-mono"

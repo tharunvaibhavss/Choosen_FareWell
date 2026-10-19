@@ -243,6 +243,225 @@ serve(async (req: Request) => {
       );
     }
 
+    // Action C: Update Student (Auth + Profile two-way synchronization)
+    if (action === "update_student") {
+      const { studentId, rollNumber, fullName, email, isActive } = body;
+      if (!studentId) {
+        return new Response(
+          JSON.stringify({ error: "Missing required field: studentId." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 1. Fetch current profile
+      const { data: targetProfile, error: targetErr } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", studentId)
+        .single();
+
+      if (targetErr || !targetProfile) {
+        return new Response(
+          JSON.stringify({ error: "Student profile not found." }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (targetProfile.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Forbidden: Cannot modify administrator account through student management." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const cleanRoll = rollNumber ? String(rollNumber).trim().toUpperCase() : targetProfile.roll_number;
+      const cleanEmail = email ? String(email).trim().toLowerCase() : targetProfile.email;
+      const cleanName = fullName ? String(fullName).trim() : targetProfile.full_name;
+      const activeStatus = isActive !== undefined ? Boolean(isActive) : targetProfile.is_active;
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return new Response(
+          JSON.stringify({ error: "Invalid email address format." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Check roll number uniqueness if changed
+      if (cleanRoll !== targetProfile.roll_number) {
+        const { data: rollConflict } = await supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .eq("roll_number", cleanRoll)
+          .neq("id", studentId)
+          .maybeSingle();
+
+        if (rollConflict) {
+          return new Response(
+            JSON.stringify({ error: `Roll number ${cleanRoll} is already registered to another student.` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // Check email uniqueness in profiles if changed
+      if (cleanEmail !== targetProfile.email) {
+        const { data: emailConflict } = await supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .eq("email", cleanEmail)
+          .neq("id", studentId)
+          .maybeSingle();
+
+        if (emailConflict) {
+          return new Response(
+            JSON.stringify({ error: `Email address ${cleanEmail} is already in use by another student profile.` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // 2. Synchronize Auth user email if changed
+      const originalAuthEmail = targetProfile.email;
+      if (cleanEmail !== targetProfile.email) {
+        const { error: authUpdateErr } = await supabaseAdmin.auth.admin.updateUserById(
+          studentId,
+          {
+            email: cleanEmail,
+            email_confirm: true,
+            user_metadata: {
+              role: "student",
+              roll_number: cleanRoll,
+              full_name: cleanName,
+              email: cleanEmail,
+            },
+          }
+        );
+
+        if (authUpdateErr) {
+          return new Response(
+            JSON.stringify({ error: `Failed to update Auth email: ${authUpdateErr.message}` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // 3. Update public.profiles
+      const { data: updatedProfile, error: profileUpdateErr } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          roll_number: cleanRoll,
+          full_name: cleanName,
+          email: cleanEmail,
+          is_active: activeStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", studentId)
+        .select()
+        .single();
+
+      if (profileUpdateErr) {
+        // Rollback Auth email if it was modified
+        if (cleanEmail !== targetProfile.email) {
+          await supabaseAdmin.auth.admin.updateUserById(studentId, {
+            email: originalAuthEmail,
+          });
+        }
+        return new Response(
+          JSON.stringify({ error: `Failed to update student profile: ${profileUpdateErr.message}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, student: updatedProfile }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Action D: Delete / Deactivate Student
+    if (action === "delete_student") {
+      const { studentId } = body;
+      if (!studentId) {
+        return new Response(
+          JSON.stringify({ error: "Missing required field: studentId." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: targetProfile, error: targetErr } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", studentId)
+        .single();
+
+      if (targetErr || !targetProfile) {
+        return new Response(
+          JSON.stringify({ error: "Student profile not found." }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (targetProfile.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Forbidden: Cannot delete administrator accounts." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Check if student has final submissions
+      const { data: submission } = await supabaseAdmin
+        .from("submissions")
+        .select("id")
+        .eq("student_id", studentId)
+        .maybeSingle();
+
+      if (submission) {
+        // Safe Deactivation: Account has final submission, preserve historical answers
+        await supabaseAdmin
+          .from("profiles")
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq("id", studentId);
+
+        await supabaseAdmin.auth.admin.updateUserById(studentId, {
+          ban_duration: "876000h",
+        });
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            softDeleted: true,
+            message: "Student account has an active final submission. Account was safely deactivated to preserve yearbook memory records.",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // No submission: safe permanent deletion
+      await supabaseAdmin.from("answers").delete().or(`respondent_id.eq.${studentId},selected_student_id.eq.${studentId}`);
+      await supabaseAdmin.from("student_question_order").delete().eq("respondent_id", studentId);
+
+      const { error: delAuthErr } = await supabaseAdmin.auth.admin.deleteUser(studentId);
+      if (delAuthErr) {
+        return new Response(
+          JSON.stringify({ error: `Failed to remove Auth user: ${delAuthErr.message}` }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      await supabaseAdmin.from("profiles").delete().eq("id", studentId);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          softDeleted: false,
+          message: `Student ${targetProfile.full_name} (${targetProfile.roll_number}) account removed successfully.`,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ error: `Unknown action: ${action}` }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

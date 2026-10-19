@@ -136,30 +136,31 @@ export class AdminService {
       return { success: false, error: 'Database connection is not configured.' };
     }
     try {
-      const cleanRoll = input.rollNumber ? input.rollNumber.trim().toUpperCase() : '';
-      const cleanEmail = input.email ? input.email.trim().toLowerCase() : '';
-      const { data, error } = await supabase.rpc('admin_update_student', {
-        p_student_id: id,
-        p_roll_number: cleanRoll,
-        p_full_name: input.fullName?.trim() || '',
-        p_email: cleanEmail,
-        p_is_active: input.isActive ?? true,
+      const cleanRoll = input.rollNumber ? input.rollNumber.trim().toUpperCase() : undefined;
+      const cleanEmail = input.email ? input.email.trim().toLowerCase() : undefined;
+      const cleanName = input.fullName ? input.fullName.trim() : undefined;
+
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'update_student',
+          studentId: id,
+          rollNumber: cleanRoll,
+          fullName: cleanName,
+          email: cleanEmail,
+          isActive: input.isActive,
+        },
       });
 
       if (error) {
-        return { success: false, error: error.message };
-      }
-      if (data && !data.success) {
-        return { success: false, error: data.message || 'Update failed' };
+        const detailedError = await AdminService.parseEdgeFunctionError(error, data);
+        return { success: false, error: detailedError };
       }
 
-      const { data: updatedProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', id)
-        .single();
+      if (data && data.success && data.student) {
+        return { success: true, student: data.student as Profile };
+      }
 
-      return { success: true, student: (updatedProfile as Profile) || undefined };
+      return { success: false, error: data?.error || 'Failed to update student profile.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update student';
       return { success: false, error: msg };
@@ -234,15 +235,27 @@ export class AdminService {
       return { success: false, error: 'Database connection is not configured.', message: '', softDeleted: false };
     }
     try {
-      const { data, error } = await supabase.rpc('admin_delete_student', { p_student_id: id });
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'delete_student',
+          studentId: id,
+        },
+      });
+
       if (error) {
-        return { success: false, error: error.message, message: '', softDeleted: false };
+        const detailedError = await AdminService.parseEdgeFunctionError(error, data);
+        return { success: false, error: detailedError, message: '', softDeleted: false };
       }
-      return {
-        success: true,
-        message: data?.message || 'Student processed',
-        softDeleted: data?.soft_deleted || false,
-      };
+
+      if (data && data.success) {
+        return {
+          success: true,
+          message: data.message || 'Student processed',
+          softDeleted: data.softDeleted || false,
+        };
+      }
+
+      return { success: false, error: data?.error || 'Delete failed', message: '', softDeleted: false };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Delete failed';
       return { success: false, error: msg, message: '', softDeleted: false };
@@ -412,7 +425,7 @@ export class AdminService {
           status = 'in_progress';
         }
 
-        const studentEmail = s.email || `${s.roll_number.toLowerCase()}@mca2527.college`;
+        const studentEmail = s.email || '';
 
         return {
           id: s.id,
