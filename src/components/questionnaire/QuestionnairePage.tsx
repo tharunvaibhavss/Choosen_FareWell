@@ -316,6 +316,19 @@ export const QuestionnairePage: React.FC<QuestionnairePageProps> = ({ user }) =>
     );
   }
 
+  if (questions.length === 0) {
+    return (
+      <div className="max-w-md mx-auto my-12 p-8 bg-[#fffdfa] border border-[#ebdccb] rounded-2xl text-center scrapbook-card">
+        <h2 className="font-serif text-xl font-bold text-[#4a1525] mb-2">
+          No Questions Available
+        </h2>
+        <p className="text-xs text-[#70645c] leading-relaxed">
+          The memory questions bank is currently being prepared. Please check back shortly or contact the administrator.
+        </p>
+      </div>
+    );
+  }
+
   // If already submitted, display locked confirmation view
   if (submission) {
     return (

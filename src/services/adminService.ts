@@ -1,6 +1,5 @@
 import ExcelJS from 'exceljs';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { MockStorageService } from './mockStorage';
 import { AuthService } from './authService';
 import type { 
   StudentSummaryItem, 
@@ -39,136 +38,179 @@ export class AdminService {
   // ============================================================================
 
   static async getAllStudents(): Promise<Profile[]> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('role', 'student')
-          .order('roll_number', { ascending: true });
-
-        if (!error && data) {
-          return data as Profile[];
-        }
-      } catch (err) {
-        console.warn('Supabase getAllStudents error:', err);
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return [];
     }
-    return MockStorageService.getAllProfiles().filter((p) => p.role === 'student');
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'student')
+        .order('roll_number', { ascending: true });
+
+      if (error) {
+        console.error('Supabase getAllStudents error:', error.message);
+        return [];
+      }
+      return (data as Profile[]) || [];
+    } catch (err) {
+      console.error('Supabase getAllStudents exception:', err);
+      return [];
+    }
   }
 
   static async createStudent(input: CreateStudentInput): Promise<{ success: boolean; error?: string; student?: Profile }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const cleanRoll = input.rollNumber.trim().toUpperCase();
-        const cleanEmail = input.email.trim().toLowerCase();
-        const { data, error } = await supabase.rpc('admin_create_student', {
-          p_roll_number: cleanRoll,
-          p_full_name: input.fullName.trim(),
-          p_email: cleanEmail,
-          p_user_id: crypto.randomUUID(),
-          p_is_active: input.isActive ?? true,
-        });
-
-        if (error) {
-          return { success: false, error: error.message };
-        }
-        if (data && !data.success) {
-          return { success: false, error: data.message || 'Creation failed' };
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to create student';
-        return { success: false, error: msg };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      const cleanRoll = input.rollNumber.trim().toUpperCase();
+      const cleanEmail = input.email.trim().toLowerCase();
+      const cleanName = input.fullName.trim();
+      const studentPassword = input.password || `mca2527@${cleanRoll.toLowerCase()}`;
 
-    return MockStorageService.createStudent(input);
+      // Invoke trusted admin server-side Edge Function
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'create_student',
+          rollNumber: cleanRoll,
+          fullName: cleanName,
+          email: cleanEmail,
+          password: studentPassword,
+          isActive: input.isActive ?? true,
+        },
+      });
+
+      if (error) {
+        const detailedError = data?.error || error.message;
+        return {
+          success: false,
+          error: `Edge function 'admin-manage-user' error: ${detailedError}. If the Edge Function is not yet deployed, please provision student accounts using the secure local script: 'npx tsx scripts/provision_accounts.ts'.`,
+        };
+      }
+
+      if (data && data.success && data.student) {
+        return { success: true, student: data.student as Profile };
+      }
+
+      return { success: false, error: data?.error || 'Failed to create student account.' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create student';
+      return { success: false, error: msg };
+    }
   }
 
   static async updateStudent(id: string, input: UpdateStudentInput): Promise<{ success: boolean; error?: string; student?: Profile }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const cleanRoll = input.rollNumber ? input.rollNumber.trim().toUpperCase() : '';
-        const cleanEmail = input.email ? input.email.trim().toLowerCase() : '';
-        const { data, error } = await supabase.rpc('admin_update_student', {
-          p_student_id: id,
-          p_roll_number: cleanRoll,
-          p_full_name: input.fullName?.trim() || '',
-          p_email: cleanEmail,
-          p_is_active: input.isActive ?? true,
-        });
-
-        if (error) {
-          return { success: false, error: error.message };
-        }
-        if (data && !data.success) {
-          return { success: false, error: data.message || 'Update failed' };
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to update student';
-        return { success: false, error: msg };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      const cleanRoll = input.rollNumber ? input.rollNumber.trim().toUpperCase() : '';
+      const cleanEmail = input.email ? input.email.trim().toLowerCase() : '';
+      const { data, error } = await supabase.rpc('admin_update_student', {
+        p_student_id: id,
+        p_roll_number: cleanRoll,
+        p_full_name: input.fullName?.trim() || '',
+        p_email: cleanEmail,
+        p_is_active: input.isActive ?? true,
+      });
 
-    return MockStorageService.updateStudent(id, input);
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      if (data && !data.success) {
+        return { success: false, error: data.message || 'Update failed' };
+      }
+
+      const { data: updatedProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      return { success: true, student: (updatedProfile as Profile) || undefined };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update student';
+      return { success: false, error: msg };
+    }
   }
 
   static async toggleStudentStatus(id: string, isActive: boolean): Promise<{ success: boolean; error?: string }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase
-          .from('profiles')
-          .update({ is_active: isActive })
-          .eq('id', id);
-
-        if (error) return { success: false, error: error.message };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to toggle status';
-        return { success: false, error: msg };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_active: isActive, updated_at: new Date().toISOString() })
+        .eq('id', id);
 
-    return MockStorageService.toggleStudentStatus(id, isActive);
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to toggle status';
+      return { success: false, error: msg };
+    }
   }
 
   static async resetStudentPassword(studentId: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
-    if (!newPassword || newPassword.length < 4) {
-      return { success: false, error: 'Password must be at least 4 characters long.' };
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      // 1. Attempt direct password update via the secure admin Edge Function
+      const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+        body: {
+          action: 'reset_password',
+          studentId,
+          newPassword,
+        },
+      });
 
-    if (isSupabaseConfigured && supabase) {
-      try {
-        // In Supabase, admin resets password via auth admin API or edge function
-        console.log(`Supabase password reset requested for ${studentId}`);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Password reset failed';
-        return { success: false, error: msg };
+      if (!error && data?.success) {
+        return { success: true };
       }
-    }
 
-    MockStorageService.saveStudentPassword(studentId, newPassword);
-    return { success: true };
+      // 2. If Edge function is not deployed or fails, trigger password reset email via Supabase Auth
+      const { data: student, error: fetchErr } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', studentId)
+        .single();
+
+      if (fetchErr || !student?.email) {
+        return { success: false, error: data?.error || error?.message || 'Could not find student email address.' };
+      }
+
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(student.email);
+      if (resetErr) {
+        return { success: false, error: `Password reset email failed: ${resetErr.message}` };
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Password reset failed';
+      return { success: false, error: msg };
+    }
   }
 
   static async deleteStudent(id: string): Promise<{ success: boolean; error?: string; message: string; softDeleted: boolean }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase.rpc('admin_delete_student', { p_student_id: id });
-        if (error) {
-          return { success: false, error: error.message, message: '', softDeleted: false };
-        }
-        return {
-          success: true,
-          message: data.message || 'Student processed',
-          softDeleted: data.soft_deleted || false,
-        };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Delete failed';
-        return { success: false, error: msg, message: '', softDeleted: false };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.', message: '', softDeleted: false };
     }
-
-    return MockStorageService.deleteStudent(id);
+    try {
+      const { data, error } = await supabase.rpc('admin_delete_student', { p_student_id: id });
+      if (error) {
+        return { success: false, error: error.message, message: '', softDeleted: false };
+      }
+      return {
+        success: true,
+        message: data?.message || 'Student processed',
+        softDeleted: data?.soft_deleted || false,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Delete failed';
+      return { success: false, error: msg, message: '', softDeleted: false };
+    }
   }
 
   // ============================================================================
@@ -176,114 +218,114 @@ export class AdminService {
   // ============================================================================
 
   static async getAllQuestions(): Promise<Question[]> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('questions')
-          .select('*')
-          .order('question_number', { ascending: true });
-
-        if (!error && data) {
-          return data as Question[];
-        }
-      } catch (err) {
-        console.warn('Supabase getAllQuestions error:', err);
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return [];
     }
-    return MockStorageService.getQuestions();
+    try {
+      const { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .order('question_number', { ascending: true });
+
+      if (error) {
+        console.error('Supabase getAllQuestions error:', error.message);
+        return [];
+      }
+      return (data as Question[]) || [];
+    } catch (err) {
+      console.error('Supabase getAllQuestions exception:', err);
+      return [];
+    }
   }
 
   static async createQuestion(input: CreateQuestionInput): Promise<{ success: boolean; error?: string; question?: Question }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('questions')
-          .insert({
-            question_number: input.questionNumber,
-            question_text: input.questionText.trim(),
-            description: input.description?.trim() || '',
-            is_active: input.isActive ?? true,
-          })
-          .select()
-          .single();
-
-        if (error) return { success: false, error: error.message };
-        return { success: true, question: data as Question };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Create question failed';
-        return { success: false, error: msg };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      const { data, error } = await supabase
+        .from('questions')
+        .insert({
+          question_number: input.questionNumber,
+          question_text: input.questionText.trim(),
+          description: input.description?.trim() || '',
+          is_active: input.isActive ?? true,
+        })
+        .select()
+        .single();
 
-    return MockStorageService.createQuestion(input);
+      if (error) return { success: false, error: error.message };
+      return { success: true, question: data as Question };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Create question failed';
+      return { success: false, error: msg };
+    }
   }
 
   static async updateQuestion(id: string, input: UpdateQuestionInput): Promise<{ success: boolean; error?: string; question?: Question }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const updatePayload: Record<string, unknown> = {
-          updated_at: new Date().toISOString(),
-        };
-        if (input.questionNumber !== undefined) updatePayload.question_number = input.questionNumber;
-        if (input.questionText !== undefined) updatePayload.question_text = input.questionText.trim();
-        if (input.description !== undefined) updatePayload.description = input.description.trim();
-        if (input.isActive !== undefined) updatePayload.is_active = input.isActive;
-
-        const { data, error } = await supabase
-          .from('questions')
-          .update(updatePayload)
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (error) return { success: false, error: error.message };
-        return { success: true, question: data as Question };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Update question failed';
-        return { success: false, error: msg };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      const updatePayload: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (input.questionNumber !== undefined) updatePayload.question_number = input.questionNumber;
+      if (input.questionText !== undefined) updatePayload.question_text = input.questionText.trim();
+      if (input.description !== undefined) updatePayload.description = input.description.trim();
+      if (input.isActive !== undefined) updatePayload.is_active = input.isActive;
 
-    return MockStorageService.updateQuestion(id, input);
+      const { data, error } = await supabase
+        .from('questions')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) return { success: false, error: error.message };
+      return { success: true, question: data as Question };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Update question failed';
+      return { success: false, error: msg };
+    }
   }
 
   static async toggleQuestionStatus(id: string, isActive: boolean): Promise<{ success: boolean; error?: string }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase
-          .from('questions')
-          .update({ is_active: isActive, updated_at: new Date().toISOString() })
-          .eq('id', id);
-
-        if (error) return { success: false, error: error.message };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to toggle question status';
-        return { success: false, error: msg };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.' };
     }
+    try {
+      const { error } = await supabase
+        .from('questions')
+        .update({ is_active: isActive, updated_at: new Date().toISOString() })
+        .eq('id', id);
 
-    return MockStorageService.toggleQuestionStatus(id, isActive);
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to toggle question status';
+      return { success: false, error: msg };
+    }
   }
 
   static async deleteQuestion(id: string): Promise<{ success: boolean; error?: string; message: string; archived: boolean }> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase.rpc('admin_delete_question', { p_question_id: id });
-        if (error) {
-          return { success: false, error: error.message, message: '', archived: false };
-        }
-        return {
-          success: true,
-          message: data.message || 'Question processed',
-          archived: data.archived || false,
-        };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Delete question failed';
-        return { success: false, error: msg, message: '', archived: false };
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Database connection is not configured.', message: '', archived: false };
     }
-
-    return MockStorageService.deleteQuestion(id);
+    try {
+      const { data, error } = await supabase.rpc('admin_delete_question', { p_question_id: id });
+      if (error) {
+        return { success: false, error: error.message, message: '', archived: false };
+      }
+      return {
+        success: true,
+        message: data?.message || 'Question processed',
+        archived: data?.archived || false,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Delete question failed';
+      return { success: false, error: msg, message: '', archived: false };
+    }
   }
 
   // ============================================================================
@@ -291,61 +333,67 @@ export class AdminService {
   // ============================================================================
 
   static async getStudentSummaries(): Promise<StudentSummaryItem[]> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data: students, error: studErr } = await supabase
-          .from('profiles')
-          .select('id, roll_number, full_name, email, is_active')
-          .eq('role', 'student')
-          .order('roll_number', { ascending: true });
-
-        if (!studErr && students) {
-          const { data: submissions } = await supabase
-            .from('submissions')
-            .select('*');
-
-          const { data: answers } = await supabase
-            .from('answers')
-            .select('respondent_id');
-
-          const subMap = new Map((submissions || []).map((s) => [s.student_id, s]));
-          const countMap = new Map<string, number>();
-
-          (answers || []).forEach((a) => {
-            countMap.set(a.respondent_id, (countMap.get(a.respondent_id) || 0) + 1);
-          });
-
-          return students.map((s) => {
-            const sub = subMap.get(s.id);
-            const answeredCount = countMap.get(s.id) || 0;
-            let status: StudentSummaryItem['status'] = 'not_started';
-            if (sub && sub.status === 'submitted') {
-              status = 'submitted';
-            } else if (answeredCount > 0) {
-              status = 'in_progress';
-            }
-
-            const studentEmail = s.email || `${s.roll_number.toLowerCase()}@mca2527.college`;
-
-            return {
-              id: s.id,
-              rollNumber: s.roll_number,
-              fullName: s.full_name,
-              email: studentEmail,
-              isActive: s.is_active ?? true,
-              loginIdentifier: studentEmail,
-              answeredCount,
-              status,
-              submittedAt: sub ? sub.submitted_at : null,
-            };
-          });
-        }
-      } catch (err) {
-        console.warn('Supabase getStudentSummaries error, falling back:', err);
-      }
+    if (!isSupabaseConfigured || !supabase) {
+      return [];
     }
+    try {
+      const { data: students, error: studErr } = await supabase
+        .from('profiles')
+        .select('id, roll_number, full_name, email, is_active')
+        .eq('role', 'student')
+        .order('roll_number', { ascending: true });
 
-    return MockStorageService.getAdminStudentSummaries();
+      if (studErr) {
+        console.error('Error fetching students for summary:', studErr.message);
+        return [];
+      }
+      if (!students || students.length === 0) {
+        return [];
+      }
+
+      const { data: submissions } = await supabase
+        .from('submissions')
+        .select('*');
+
+      const { data: answers } = await supabase
+        .from('answers')
+        .select('respondent_id');
+
+      const subMap = new Map((submissions || []).map((s) => [s.student_id, s]));
+      const countMap = new Map<string, number>();
+
+      (answers || []).forEach((a) => {
+        countMap.set(a.respondent_id, (countMap.get(a.respondent_id) || 0) + 1);
+      });
+
+      return students.map((s) => {
+        const sub = subMap.get(s.id);
+        const answeredCount = countMap.get(s.id) || 0;
+        let status: StudentSummaryItem['status'] = 'not_started';
+        if (sub && sub.status === 'submitted') {
+          status = 'submitted';
+        } else if (answeredCount > 0) {
+          status = 'in_progress';
+        }
+
+        const studentEmail = s.email || `${s.roll_number.toLowerCase()}@mca2527.college`;
+
+        return {
+          id: s.id,
+          rollNumber: s.roll_number,
+          fullName: s.full_name,
+          email: studentEmail,
+          isActive: s.is_active ?? true,
+          loginIdentifier: studentEmail,
+          answeredCount,
+          status,
+          submittedAt: sub ? sub.submitted_at : null,
+        };
+      });
+    } catch (err) {
+      console.error('Supabase getStudentSummaries exception:', err);
+      return [];
+    }
   }
 
   static async getValidatedAnalysisData(): Promise<{
@@ -382,12 +430,8 @@ export class AdminService {
           rawAnswers = data as RawAnswerItem[];
         }
       } catch (err) {
-        console.warn('Supabase getValidatedAnalysisData answers fetch error, falling back to mock:', err);
+        console.warn('Supabase getValidatedAnalysisData answers fetch error:', err);
       }
-    }
-
-    if (rawAnswers.length === 0) {
-      rawAnswers = MockStorageService.getAllAnswersRaw();
     }
 
     // 1. Enforce strict data consistency rules:

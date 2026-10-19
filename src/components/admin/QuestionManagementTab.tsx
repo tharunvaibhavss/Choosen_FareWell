@@ -298,7 +298,7 @@ export const QuestionManagementTab: React.FC = () => {
             {loading ? (
               <tr>
                 <td colSpan={4} className="py-8 text-center text-[#8c7e73]">
-                  Loading 72 questions...
+                  Loading questions bank...
                 </td>
               </tr>
             ) : filteredQuestions.length === 0 ? (

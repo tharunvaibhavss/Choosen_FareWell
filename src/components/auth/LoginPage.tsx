@@ -6,9 +6,7 @@ import {
   Eye, 
   EyeOff, 
   ArrowRight, 
-  AlertCircle, 
-  Sparkles,
-  ShieldCheck 
+  AlertCircle
 } from 'lucide-react';
 import { AuthService } from '../../services/authService';
 import { BotanicalFlower, TapeStrip, PaperFlourish } from '../common/ScrapbookDecorations';
@@ -50,13 +48,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, isSupabase
     }
   };
 
-  // Quick preset helper for convenient testing
-  const handleSelectPreset = (presetId: string, defaultPass: string) => {
-    setIdentifier(presetId);
-    setPassword(defaultPass);
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
       {/* Background Vintage Flourishes */}
@@ -89,6 +80,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, isSupabase
 
           <PaperFlourish />
         </div>
+
+        {/* Configuration Notice */}
+        {isSupabaseLive === false && (
+          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs my-4 animate-in fade-in">
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <span className="leading-relaxed">
+              Supabase connection is not configured. Please check your environment variables in .env.local.
+            </span>
+          </div>
+        )}
 
         {/* Error Notice */}
         {error && (
@@ -169,56 +170,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, isSupabase
           </button>
         </form>
 
-        {/* Quick Demo Preset Picker */}
-        <div className="mt-6 pt-5 border-t border-[#eeddc8]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#8a7b70] flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-[#c59b27]" />
-              Quick Demo Accounts:
-            </span>
-            <span className="text-[10px] text-[#96887c]">
-              Click to autofill
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleSelectPreset('MCA2501', 'mca2025')}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#faf3ea] hover:bg-[#f2e6d6] text-[#4a1525] border border-[#e4d6c3] transition-all cursor-pointer"
-            >
-              Aishwarya (MCA2501)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectPreset('MCA2502', 'mca2025')}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#faf3ea] hover:bg-[#f2e6d6] text-[#4a1525] border border-[#e4d6c3] transition-all cursor-pointer"
-            >
-              Arjun (MCA2502)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectPreset('MCA2554', 'mca2025')}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#faf3ea] hover:bg-[#f2e6d6] text-[#4a1525] border border-[#e4d6c3] transition-all cursor-pointer"
-            >
-              Naveen (MCA2554)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectPreset('admin', 'Admin@MCA2025!')}
-              className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#faeff2] hover:bg-[#f3dfe4] text-[#581c3f] border border-[#e4c9d1] transition-all cursor-pointer flex items-center gap-1"
-            >
-              <ShieldCheck className="w-3 h-3 text-[#581c3f]" />
-              Admin
-            </button>
-          </div>
-        </div>
-
-        {/* Backend status note */}
-        <div className="mt-4 text-center">
-          <span className="text-[10px] text-[#918379]">
-            {isSupabaseLive ? 'Connected to live Supabase Auth & RLS' : 'Running in Local Persistent Mode (Seed ready)'}
-          </span>
+        {/* Production Credentials Note */}
+        <div className="mt-6 pt-4 border-t border-[#eeddc8] text-center">
+          <p className="text-[11px] text-[#8a7b70] leading-relaxed">
+            Please sign in using your official MCA roll number or administrator credentials.
+          </p>
         </div>
       </div>
     </div>

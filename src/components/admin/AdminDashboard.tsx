@@ -46,10 +46,9 @@ export const AdminDashboard: React.FC = () => {
     loadData();
   }, []);
 
-  const totalStudents = summaries.length || 60;
+  const totalStudents = summaries.length;
   const completedCount = summaries.filter((s) => s.status === 'submitted').length;
-  const pendingCount = totalStudents - completedCount;
-  // Requirement 3: 59 required answers denominator for progress
+  const pendingCount = Math.max(0, totalStudents - completedCount);
   const completionPercentage = totalStudents > 0 ? Math.round((completedCount / totalStudents) * 100) : 0;
 
   // Filtered rows for submissions

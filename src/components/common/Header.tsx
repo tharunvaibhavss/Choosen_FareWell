@@ -44,9 +44,9 @@ export const Header: React.FC<HeaderProps> = ({ user, onLogout, isSupabaseLive }
               Supabase Live
             </span>
           ) : (
-            <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-medium" title="Operating with local persistence.">
+            <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-medium" title="Supabase configuration required in .env.local">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-              Local Persistent
+              Supabase Disconnected
             </span>
           )}
 

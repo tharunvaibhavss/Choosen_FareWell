@@ -417,12 +417,14 @@ export class MockStorageService {
       id: `ord-${studentId}-${q.id}`,
       respondent_id: studentId,
       question_id: q.id,
+      question_position: idx + 1,
       position: idx + 1,
       is_marked_for_review: false,
       question_number: q.question_number,
       question_text: q.question_text,
       description: q.description,
     }));
+
 
     allOrdersMap[studentId] = newOrder;
     localStorage.setItem(STORAGE_KEYS.STUDENT_ORDERS, JSON.stringify(allOrdersMap));

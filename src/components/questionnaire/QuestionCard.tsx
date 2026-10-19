@@ -159,24 +159,32 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         id="classmate-grid-panel"
         className="flex-1 min-h-0 mt-1 pt-1 overflow-y-auto overflow-x-hidden pr-1.5 classmate-scroll-panel max-h-[52vh] lg:max-h-none"
       >
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
-          {classmates.map((classmate) => {
-            const isSelected = selectedClassmateId === classmate.id;
-            const isSelf = classmate.id === currentUserId;
-            const selectedInOtherQ = classmateSelectionsMap.get(classmate.id);
+        {classmates.length === 0 ? (
+          <div className="py-12 px-4 text-center bg-[#faf5ed] rounded-xl border border-dashed border-[#ebdccb]">
+            <p className="text-xs text-[#7d6f66] font-medium">
+              No registered student classmates are currently available in the database.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+            {classmates.map((classmate) => {
+              const isSelected = selectedClassmateId === classmate.id;
+              const isSelf = classmate.id === currentUserId;
+              const selectedInOtherQ = classmateSelectionsMap.get(classmate.id);
 
-            return (
-              <ClassmateCard
-                key={classmate.id}
-                classmate={classmate}
-                isSelected={isSelected}
-                isSelf={isSelf}
-                selectedInOtherQuestionNumber={selectedInOtherQ}
-                onSelect={onSelectClassmate}
-              />
-            );
-          })}
-        </div>
+              return (
+                <ClassmateCard
+                  key={classmate.id}
+                  classmate={classmate}
+                  isSelected={isSelected}
+                  isSelf={isSelf}
+                  selectedInOtherQuestionNumber={selectedInOtherQ}
+                  onSelect={onSelectClassmate}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );

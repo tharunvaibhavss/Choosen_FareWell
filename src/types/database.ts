@@ -25,13 +25,16 @@ export interface StudentQuestionOrder {
   id: string;
   respondent_id: string;
   question_id: string;
-  position: number; // 1 to 72
+  question_position: number; // 1 to 72
+  position?: number; // backward compatibility alias
   is_marked_for_review: boolean;
   question_number?: number;
   question_text?: string;
   description?: string;
   created_at?: string;
 }
+
+
 
 export interface Answer {
   id: string;

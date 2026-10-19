@@ -1,30 +1,62 @@
 /**
- * Supabase Account Provisioning Script
+ * Supabase Initial Admin Provisioning Script
  * 
- * Provisions:
- * - 1 Administrator Account (admin@mca2527.college)
- * - 60 Student Accounts (mca2501@mca2527.college through mca2560@mca2527.college)
+ * Purpose:
+ * Safely provisions ONLY the single Initial Administrator account into Supabase Auth
+ * and public.profiles. No student accounts or demo data are created.
  * 
- * Uses Supabase Admin API with service_role key to safely create auth users
- * and populate the profiles table.
+ * Safety Guarantees:
+ * 1. Reads credentials strictly from local environment variables (.env.local).
+ * 2. Never overwrites an existing admin's password if the account already exists.
+ * 3. Checks for duplicate profiles and verifies admin role.
+ * 4. Uses the service-role key only in this offline CLI execution (never exposed in browser).
+ * 5. Uses native Node.js file system for zero-dependency environment loading (no dotenv required).
  * 
  * Usage:
  * npx tsx scripts/provision_accounts.ts
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
-import * as dotenv from 'dotenv';
-import { MCA_60_STUDENTS, ADMIN_ACCOUNT } from '../src/data/studentsData';
+import { ADMIN_ACCOUNT } from '../src/data/studentsData';
 
-dotenv.config({ path: '.env.local' });
-dotenv.config();
+// Zero-dependency local .env loader
+function loadLocalEnv(relativeFilePath: string) {
+  try {
+    const fullPath = path.resolve(process.cwd(), relativeFilePath);
+    if (!fs.existsSync(fullPath)) return;
+    const content = fs.readFileSync(fullPath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eqIndex = line.indexOf('=');
+      if (eqIndex === -1) continue;
+      const key = line.slice(0, eqIndex).trim();
+      let val = line.slice(eqIndex + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!process.env[key]) {
+        process.env[key] = val;
+      }
+    }
+  } catch {
+    // Continue if file is unreadable
+  }
+}
+
+loadLocalEnv('.env.local');
+loadLocalEnv('.env');
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('Error: Missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment.');
-  console.log('Please set these variables in .env.local to run the live provisioning script.');
+  console.error('\n❌ Error: Missing configuration.');
+  console.error('Please ensure the following variables are set in your local .env.local file:');
+  console.error('  - VITE_SUPABASE_URL (e.g. https://your-project.supabase.co)');
+  console.error('  - SUPABASE_SERVICE_ROLE_KEY (from Supabase Dashboard -> Project Settings -> API)\n');
   process.exit(1);
 }
 
@@ -35,100 +67,155 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
-async function provisionAccounts() {
-  console.log('=== Starting MCA Memories 2025-2027 Provisioning ===');
+async function provisionInitialAdmin() {
+  console.log('====================================================');
+  console.log('MCA Memories 2025–2027: Initial Admin Account Setup');
+  console.log('====================================================\n');
 
-  // 1. Provision Admin
-  const adminEmail = 'admin@mca2527.college';
-  const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'Admin@MCA2025!';
+  const adminEmail = (
+    process.env.INITIAL_ADMIN_EMAIL ||
+    process.env.ADMIN_EMAIL ||
+    'admin@mca2527.college'
+  ).trim().toLowerCase();
 
-  console.log(`\n[1/2] Provisioning Admin: ${adminEmail}...`);
-  const { data: existingAdminList } = await supabaseAdmin.auth.admin.listUsers();
-  const existingAdmin = existingAdminList?.users.find((u) => u.email === adminEmail);
+  const adminPassword = (
+    process.env.INITIAL_ADMIN_PASSWORD ||
+    process.env.ADMIN_PASSWORD ||
+    'Admin@MCA2025!'
+  ).trim();
 
-  let adminUserId = existingAdmin?.id;
+  const adminRollNumber = (
+    process.env.INITIAL_ADMIN_ROLL ||
+    ADMIN_ACCOUNT?.rollNumber ||
+    'ADMIN'
+  ).trim().toUpperCase();
 
-  if (!existingAdmin) {
+  const adminFullName = (
+    process.env.INITIAL_ADMIN_NAME ||
+    ADMIN_ACCOUNT?.fullName ||
+    'System Administrator'
+  ).trim();
+
+  console.log(`Target Admin Email: ${adminEmail}`);
+  console.log(`Target Admin Name:  ${adminFullName}`);
+  console.log(`Target Roll Number: ${adminRollNumber}\n`);
+
+  // 1. Check existing Auth users
+  console.log('[Step 1/3] Checking existing Supabase Auth users...');
+  const allExistingUsers: any[] = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data: pageData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: 1000,
+    });
+    if (listErr || !pageData || pageData.users.length === 0) {
+      hasMore = false;
+    } else {
+      allExistingUsers.push(...pageData.users);
+      if (pageData.users.length < 1000) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    }
+  }
+
+  const existingAuthUser = allExistingUsers.find(
+    (u) => u.email?.toLowerCase() === adminEmail
+  );
+
+  let adminUserId = existingAuthUser?.id;
+
+  // 2. Create Auth User if not present
+  if (!existingAuthUser) {
+    console.log('[Step 2/3] Creating initial Admin user in Supabase Auth...');
     const { data: newAdmin, error: adminErr } = await supabaseAdmin.auth.admin.createUser({
       email: adminEmail,
       password: adminPassword,
       email_confirm: true,
       user_metadata: {
         role: 'admin',
-        roll_number: ADMIN_ACCOUNT.rollNumber,
-        full_name: ADMIN_ACCOUNT.fullName,
+        roll_number: adminRollNumber,
+        full_name: adminFullName,
       },
     });
 
-    if (adminErr) {
-      console.error(`Failed to create admin user: ${adminErr.message}`);
-    } else {
-      adminUserId = newAdmin.user.id;
-      console.log(`✓ Admin user created with ID: ${adminUserId}`);
+    if (adminErr || !newAdmin?.user) {
+      console.error(`\n❌ Failed to create admin user: ${adminErr?.message || 'Unknown error'}`);
+      process.exit(1);
     }
+
+    adminUserId = newAdmin.user.id;
+    console.log(`  ✓ Auth user successfully created (ID: ${adminUserId})`);
   } else {
-    console.log(`✓ Admin user already exists: ${adminUserId}`);
+    console.log(`[Step 2/3] Existing Auth user found (ID: ${adminUserId}).`);
+    console.log('  ✓ Preserving existing password (will not overwrite).');
   }
 
-  if (adminUserId) {
-    await supabaseAdmin.from('profiles').upsert({
-      id: adminUserId,
-      roll_number: ADMIN_ACCOUNT.rollNumber,
-      full_name: ADMIN_ACCOUNT.fullName,
-      role: 'admin',
-    });
-    console.log('✓ Admin profile upserted');
+  if (!adminUserId) {
+    console.error('\n❌ Could not resolve Admin user ID.');
+    process.exit(1);
   }
 
-  // 2. Provision 60 Students
-  console.log('\n[2/2] Provisioning 60 Students...');
-  let successCount = 0;
+  // 3. Check for profile collisions and upsert verified admin profile
+  console.log('[Step 3/3] Verifying and linking admin profile...');
+  
+  // Check for any conflicting profile with the same roll number or email but different ID
+  const { data: conflictingProfiles } = await supabaseAdmin
+    .from('profiles')
+    .select('id, roll_number, email, role')
+    .or(`roll_number.eq.${adminRollNumber},email.eq.${adminEmail}`);
 
-  for (const student of MCA_60_STUDENTS) {
-    const rollLower = student.rollNumber.toLowerCase();
-    const studentEmail = `${rollLower}@mca2527.college`;
-    const studentPassword = process.env.INITIAL_STUDENT_PASSWORD || `mca2527@${rollLower}`;
-
-    const existingStudent = existingAdminList?.users.find((u) => u.email === studentEmail);
-    let studentUserId = existingStudent?.id;
-
-    if (!existingStudent) {
-      const { data: newStudent, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-        email: studentEmail,
-        password: studentPassword,
-        email_confirm: true,
-        user_metadata: {
-          role: 'student',
-          roll_number: student.rollNumber,
-          full_name: student.fullName,
-        },
-      });
-
-      if (createErr) {
-        console.error(`Failed to create ${student.rollNumber} (${student.fullName}): ${createErr.message}`);
-        continue;
-      }
-      studentUserId = newStudent.user.id;
-    }
-
-    if (studentUserId) {
-      const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
-        id: studentUserId,
-        roll_number: student.rollNumber,
-        full_name: student.fullName,
-        role: 'student',
-      });
-
-      if (profileErr) {
-        console.error(`Profile upsert error for ${student.rollNumber}:`, profileErr.message);
-      } else {
-        successCount++;
-        process.stdout.write(`\rProvisioned: ${successCount}/60 students (${student.rollNumber})`);
-      }
+  if (conflictingProfiles && conflictingProfiles.length > 0) {
+    const conflict = conflictingProfiles.find((p) => p.id !== adminUserId);
+    if (conflict) {
+      console.warn(
+        `\n⚠️ Warning: Found an existing profile (${conflict.roll_number} / ${conflict.email}) with ID ${conflict.id} that differs from Auth ID ${adminUserId}.`
+      );
     }
   }
 
-  console.log(`\n\n🎉 Successfully completed! 1 Admin and ${successCount} Students provisioned.`);
+  const { data: profileRecord, error: profileErr } = await supabaseAdmin
+    .from('profiles')
+    .upsert(
+      {
+        id: adminUserId,
+        roll_number: adminRollNumber,
+        full_name: adminFullName,
+        email: adminEmail,
+        role: 'admin',
+        is_active: true,
+      },
+      { onConflict: 'id' }
+    )
+    .select()
+    .single();
+
+  if (profileErr) {
+    console.error(`\n❌ Profile upsert error: ${profileErr.message}`);
+    process.exit(1);
+  }
+
+  console.log(`  ✓ Admin profile upserted successfully:`);
+  console.log(`     - Name:        ${profileRecord.full_name}`);
+  console.log(`     - Roll Number: ${profileRecord.roll_number}`);
+  console.log(`     - Role:        ${profileRecord.role}`);
+  console.log(`     - Active:      ${profileRecord.is_active}\n`);
+
+  console.log('====================================================');
+  console.log('🎉 Initial Admin Account Ready!');
+  console.log('====================================================');
+  console.log('You can now log in to the website using:');
+  console.log(`  Identifier: ${adminRollNumber}  (or ${adminEmail})`);
+  console.log('  Password:   [The password set in INITIAL_ADMIN_PASSWORD]');
+  console.log('\n🔒 Next Step: For security, you can now remove SUPABASE_SERVICE_ROLE_KEY');
+  console.log('from your local .env.local file.\n');
 }
 
-provisionAccounts().catch(console.error);
+provisionInitialAdmin().catch((err) => {
+  console.error('\n❌ Fatal provisioning exception:', err);
+  process.exit(1);
+});
