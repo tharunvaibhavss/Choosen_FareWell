@@ -89,6 +89,43 @@ export interface StudentQuestionAnalysisRow {
   respondentNames: string;
 }
 
+export interface StudentDetailExportRow {
+  rollNumber: string;
+  fullName: string;
+  email: string;
+  accountStatus: string;
+  passwordStatus: string;
+  studentId: string;
+}
+
+export interface QuestionBankExportRow {
+  questionNumber: number;
+  questionText: string;
+  activeStatus: string;
+  questionId: string;
+}
+
+export interface AnswerMemoryExportRow {
+  respondentRollNumber: string;
+  respondentName: string;
+  questionNumber: number;
+  questionText: string;
+  selectedClassmateRollNumber: string;
+  selectedClassmateName: string;
+  answerId: string;
+  answeredAt: string;
+}
+
+export interface SubmissionSummaryExportRow {
+  rollNumber: string;
+  studentName: string;
+  answeredCount: number;
+  distinctClassmatesCount: number;
+  submissionStatus: string;
+  submittedAt: string | null;
+  accountStatus: string;
+}
+
 export interface StudentSelectionSummaryRow {
   studentRollNumber: string;
   studentName: string;
