@@ -6,11 +6,6 @@ import type {
   DetailedAnswerExportRow, 
   StudentQuestionAnalysisRow,
   StudentSelectionSummaryRow,
-  StudentDetailExportRow,
-  QuestionBankExportRow,
-  AnswerMemoryExportRow,
-  SubmissionSummaryExportRow,
-  Submission,
   Profile, 
   Question, 
   CreateStudentInput, 
@@ -26,24 +21,6 @@ export function parseRollNumber(roll: string | number | undefined | null): numbe
   if (trailing) return parseInt(trailing[1], 10);
   const match = str.match(/\d+/);
   return match ? parseInt(match[0], 10) : 0;
-}
-
-export function formatExportDateTime(dateVal: string | Date | null | undefined): string {
-  if (!dateVal) return '—';
-  try {
-    const d = new Date(dateVal);
-    if (isNaN(d.getTime())) return '—';
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const y = d.getFullYear();
-    const m = pad(d.getMonth() + 1);
-    const day = pad(d.getDate());
-    const hours = pad(d.getHours());
-    const mins = pad(d.getMinutes());
-    const secs = pad(d.getSeconds());
-    return `${y}-${m}-${day} ${hours}:${mins}:${secs}`;
-  } catch {
-    return '—';
-  }
 }
 
 export function formatRollValue(roll: string | number | undefined | null): number | string {
@@ -631,24 +608,9 @@ export class AdminService {
     detailedRows: DetailedAnswerExportRow[];
     sheet3Rows: (StudentQuestionAnalysisRow & { selectedStudentId: string })[];
     sheet4Rows: StudentSelectionSummaryRow[];
-    studentDetailRows: StudentDetailExportRow[];
-    questionBankRows: QuestionBankExportRow[];
-    answerMemoryRows: AnswerMemoryExportRow[];
-    submissionSummaryRows: SubmissionSummaryExportRow[];
   }> {
-    const rawStudents = await this.getAllStudents();
-    const rawQuestions = await this.getAllQuestions();
-
-    // Sort students numerically by roll number: 25MCA001 to 25MCA060
-    const students = [...rawStudents].sort((a, b) => {
-      const numA = parseRollNumber(a.roll_number);
-      const numB = parseRollNumber(b.roll_number);
-      if (numA !== numB) return numA - numB;
-      return a.roll_number.localeCompare(b.roll_number);
-    });
-
-    // Sort questions by question number ascending: 1 to 72
-    const questions = [...rawQuestions].sort((a, b) => a.question_number - b.question_number);
+    const students = await this.getAllStudents();
+    const questions = await this.getAllQuestions();
 
     const studentsMap = new Map<string, Profile>(students.map((s) => [s.id, s]));
     const questionsMap = new Map<string, Question>(questions.map((q) => [q.id, q]));
@@ -664,7 +626,6 @@ export class AdminService {
 
     let rawAnswers: RawAnswerItem[] = [];
 
-    // Paginated answers retrieval ensuring zero records are lost to PostgREST 1,000-row limits
     if (isSupabaseConfigured && supabase) {
       try {
         const pageSize = 1000;
@@ -694,36 +655,16 @@ export class AdminService {
           }
         }
       } catch (err) {
-        console.warn('Supabase getValidatedAnalysisData answers fetch exception:', err);
+        console.warn('Supabase getValidatedAnalysisData answers fetch error:', err);
       }
     }
-
-    // Fetch submissions to calculate authoritative submission status
-    let rawSubmissions: Submission[] = [];
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data: subs, error: subErr } = await supabase
-          .from('submissions')
-          .select('*');
-        if (!subErr && subs) {
-          rawSubmissions = subs as Submission[];
-        }
-      } catch (err) {
-        console.warn('Supabase submissions fetch error:', err);
-      }
-    }
-    const submissionMap = new Map<string, Submission>(
-      rawSubmissions.map((s) => [s.student_id, s])
-    );
 
     // 1. Enforce strict data consistency rules:
     // - One respondent, one original question, one selected student
     // - Exclude self-selections (respondent_id !== selected_student_id)
     // - Exclude duplicate answers for the same (respondent, question)
-    // - Exclude duplicate nominations for the same (respondent, classmate)
     // - Ensure valid profile and question records exist
     interface ValidAnswerRecord {
-      id: string;
       respondentId: string;
       respondentRoll: string;
       respondentName: string;
@@ -763,7 +704,6 @@ export class AdminService {
       seenRespondentClassmate.add(classmateKey);
 
       validAnswers.push({
-        id: ans.id || '',
         respondentId: respondent.id,
         respondentRoll: respondent.roll_number,
         respondentName: respondent.full_name,
@@ -777,104 +717,25 @@ export class AdminService {
       });
     }
 
-    // Sort valid answers: Respondent Roll Number (numerically: 1 to 60), then Question Number (ascending: 1 to 72)
-    validAnswers.sort((a, b) => {
-      const numA = parseRollNumber(a.respondentRoll);
-      const numB = parseRollNumber(b.respondentRoll);
-      if (numA !== numB) return numA - numB;
-      const rollComp = a.respondentRoll.localeCompare(b.respondentRoll);
-      if (rollComp !== 0) return rollComp;
-      return a.questionNumber - b.questionNumber;
-    });
-
-    // 2. Build Sheet 1: Student Details Rows
-    const studentDetailRows: StudentDetailExportRow[] = students.map((s) => ({
-      rollNumber: s.roll_number,
-      fullName: s.full_name,
-      email: s.email || `${s.roll_number.toLowerCase()}@mcafarewell.com`,
-      accountStatus: (s.is_active ?? true) ? 'ACTIVE' : 'DISABLED',
-      passwordStatus: s.password_changed_at || s.must_change_password === false ? 'Changed' : 'Default (Must Change)',
-      studentId: s.id,
-    }));
-
-    // 3. Build Sheet 2: Question Bank Rows
-    const questionBankRows: QuestionBankExportRow[] = questions.map((q) => ({
-      questionNumber: q.question_number,
-      questionText: q.question_text,
-      activeStatus: q.is_active ? 'ACTIVE' : 'INACTIVE',
-      questionId: q.id,
-    }));
-
-    // 4. Build Sheet 3: Answers / Memory Selections Rows
-    const answerMemoryRows: AnswerMemoryExportRow[] = validAnswers.map((a) => ({
+    // 2. Build Detailed Rows (Sheet 2)
+    const detailedRows: DetailedAnswerExportRow[] = validAnswers.map((a) => ({
       respondentRollNumber: a.respondentRoll,
       respondentName: a.respondentName,
       questionNumber: a.questionNumber,
       questionText: a.questionText,
       selectedClassmateRollNumber: a.selectedStudentRoll,
       selectedClassmateName: a.selectedStudentName,
-      answerId: a.id,
       answeredAt: a.answeredAt,
-    }));
-
-    // Legacy DetailedAnswerExportRow for backward compatibility
-    const detailedRows: DetailedAnswerExportRow[] = answerMemoryRows.map((a) => ({
-      respondentRollNumber: a.respondentRollNumber,
-      respondentName: a.respondentName,
-      questionNumber: a.questionNumber,
-      questionText: a.questionText,
-      selectedClassmateRollNumber: a.selectedClassmateRollNumber,
-      selectedClassmateName: a.selectedClassmateName,
-      answeredAt: a.answeredAt,
-    }));
-
-    // 5. Build Sheet 4: Submission Summary Rows
-    // Calculate actual valid answer counts and distinct classmate counts per student
-    const respondentAnswersCountMap = new Map<string, number>();
-    const respondentDistinctClassmatesMap = new Map<string, Set<string>>();
-
-    for (const a of validAnswers) {
-      respondentAnswersCountMap.set(
-        a.respondentId,
-        (respondentAnswersCountMap.get(a.respondentId) || 0) + 1
-      );
-      let set = respondentDistinctClassmatesMap.get(a.respondentId);
-      if (!set) {
-        set = new Set<string>();
-        respondentDistinctClassmatesMap.set(a.respondentId, set);
-      }
-      set.add(a.selectedStudentId);
-    }
-
-    const submissionSummaryRows: SubmissionSummaryExportRow[] = students.map((student) => {
-      const sub = submissionMap.get(student.id);
-      const answeredCount = respondentAnswersCountMap.get(student.id) || 0;
-      const distinctCount = respondentDistinctClassmatesMap.get(student.id)?.size || 0;
-
-      let status = 'NOT STARTED';
-      // Critical requirement: Do not label an incomplete questionnaire as Submitted
-      if (sub && sub.status === 'submitted' && answeredCount >= 59) {
-        status = 'SUBMITTED';
-      } else if (answeredCount > 0) {
-        status = 'IN PROGRESS';
-      }
-
-      const submittedAt = (sub && sub.status === 'submitted' && answeredCount >= 59)
-        ? sub.submitted_at
-        : null;
-
-      return {
-        rollNumber: student.roll_number,
-        studentName: student.full_name,
-        answeredCount,
-        distinctClassmatesCount: distinctCount,
-        submissionStatus: status,
-        submittedAt,
-        accountStatus: (student.is_active ?? true) ? 'ACTIVE' : 'DISABLED',
-      };
+    })).sort((a, b) => {
+      const rollDiff = parseRollNumber(a.respondentRollNumber) - parseRollNumber(b.respondentRollNumber);
+      if (rollDiff !== 0) return rollDiff;
+      const rollComp = a.respondentRollNumber.localeCompare(b.respondentRollNumber);
+      if (rollComp !== 0) return rollComp;
+      return a.questionNumber - b.questionNumber;
     });
 
-    // 6. Build Backward-Compatible Repetition Analysis (Sheet 3 & Sheet 4 legacy structures)
+    // 3. Build Sheet 3: Student & Question Analysis
+    // Group answers by selectedStudentId and original questionId
     const sheet3GroupMap = new Map<string, {
       selectedStudentId: string;
       selectedStudentRoll: string;
@@ -907,6 +768,8 @@ export class AdminService {
     const sheet3Rows: (StudentQuestionAnalysisRow & { selectedStudentId: string })[] = [];
 
     for (const group of sheet3GroupMap.values()) {
+      // 4. Sort the respondent roll numbers numerically in ascending order.
+      // 5. Keep respondent names in the corresponding order of their roll numbers.
       const sortedRespondents = Array.from(group.respondentsMap.values()).sort((a, b) => {
         const numA = parseRollNumber(a.rollNumber);
         const numB = parseRollNumber(b.rollNumber);
@@ -925,6 +788,10 @@ export class AdminService {
       });
     }
 
+    // Sort Sheet 3 rows:
+    // 1. Sort selected student names alphabetically in ascending order, A to Z.
+    // 2. Within each selected student, sort questions by Repetition Count in descending order, highest to lowest.
+    // 3. If two questions have the same count, sort their question text alphabetically.
     sheet3Rows.sort((a, b) => {
       const nameComp = a.selectedStudentName.localeCompare(b.selectedStudentName);
       if (nameComp !== 0) return nameComp;
@@ -939,6 +806,8 @@ export class AdminService {
       return a.questionText.localeCompare(b.questionText);
     });
 
+    // 4. Build Sheet 4: Student Selection Summary
+    // Sourced from all 60 students, sorted numerically by roll number
     const studentSheet3Map = new Map<string, typeof sheet3Rows>();
     for (const row of sheet3Rows) {
       const list = studentSheet3Map.get(row.selectedStudentId) || [];
@@ -946,7 +815,15 @@ export class AdminService {
       studentSheet3Map.set(row.selectedStudentId, list);
     }
 
-    const sheet4Rows: StudentSelectionSummaryRow[] = students.map((student) => {
+    // Sort students by roll number numerically in ascending order (e.g. 1, 2, ... 60)
+    const sortedStudents = [...students].sort((a, b) => {
+      const numA = parseRollNumber(a.roll_number);
+      const numB = parseRollNumber(b.roll_number);
+      if (numA !== numB) return numA - numB;
+      return a.roll_number.localeCompare(b.roll_number);
+    });
+
+    const sheet4Rows: StudentSelectionSummaryRow[] = sortedStudents.map((student) => {
       const qRows = studentSheet3Map.get(student.id) || [];
 
       if (qRows.length === 0) {
@@ -960,6 +837,7 @@ export class AdminService {
         };
       }
 
+      // Explicitly sort qRows for this student: highest repetition count first; tie-break alphabetically by question text
       const sortedQRows = [...qRows].sort((a, b) => {
         if (b.repetitionCount !== a.repetitionCount) {
           return b.repetitionCount - a.repetitionCount;
@@ -987,10 +865,6 @@ export class AdminService {
       detailedRows,
       sheet3Rows,
       sheet4Rows,
-      studentDetailRows,
-      questionBankRows,
-      answerMemoryRows,
-      submissionSummaryRows,
     };
   }
 
@@ -1009,8 +883,9 @@ export class AdminService {
       throw new Error('Unauthorized: Only administrators are permitted to export yearbook submissions.');
     }
 
+    const summaries = await this.getStudentSummaries();
     const analysisData = await this.getValidatedAnalysisData();
-    const { students, questions, answerMemoryRows, submissionSummaryRows } = analysisData;
+    const detailed = analysisData.detailedRows;
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'MCA Memories 2025–2027 Yearbook System';
@@ -1018,61 +893,58 @@ export class AdminService {
     workbook.created = new Date();
     workbook.modified = new Date();
 
-    const exportTimestamp = formatExportDateTime(new Date());
-
     // =========================================================================
-    // SHEET 1: Student Details
+    // SHEET 1: Summary Report
     // =========================================================================
-    const studentSheet = workbook.addWorksheet('Student Details', {
+    const summarySheet = workbook.addWorksheet('Summary Report', {
       views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
       properties: { tabColor: { argb: 'FF581C3F' } },
     });
 
     // Title Banner
-    studentSheet.mergeCells('A1:F1');
-    const s1Title = studentSheet.getCell('A1');
-    s1Title.value = 'MCA MEMORIES 2025–2027 • STUDENT DETAILS';
-    s1Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-    s1Title.fill = {
+    summarySheet.mergeCells('A1:F1');
+    const titleCell = summarySheet.getCell('A1');
+    titleCell.value = 'MCA MEMORIES 2025–2027 • STUDENT QUESTIONNAIRE SUMMARY';
+    titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: 'FF581C3F' },
     };
-    s1Title.alignment = { vertical: 'middle', horizontal: 'center' };
-    studentSheet.getRow(1).height = 36;
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    summarySheet.getRow(1).height = 36;
 
-    // Subtitle
-    studentSheet.mergeCells('A2:F2');
-    const s1Sub = studentSheet.getCell('A2');
-    const minRoll = students.length > 0 ? students[0].roll_number : '—';
-    const maxRoll = students.length > 0 ? students[students.length - 1].roll_number : '—';
-    s1Sub.value = `Total Registered Students: ${students.length} • Roll Numbers: ${minRoll} to ${maxRoll} • Exported on ${exportTimestamp}`;
-    s1Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
-    s1Sub.alignment = { vertical: 'middle', horizontal: 'center' };
-    studentSheet.getRow(2).height = 22;
+    // Subtitle (Requirement 3: Denominator 59)
+    summarySheet.mergeCells('A2:F2');
+    const subCell = summarySheet.getCell('A2');
+    const submittedCount = summaries.filter((s) => s.status === 'submitted').length;
+    subCell.value = `Batch of ${summaries.length} Students • ${submittedCount} Completed • ${summaries.length - submittedCount} Pending • 59 Required Answers Denominator • Exported on ${new Date().toLocaleString()}`;
+    subCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
+    subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    summarySheet.getRow(2).height = 22;
 
     // Column Headers
-    studentSheet.getRow(4).values = [
+    summarySheet.getRow(4).values = [
       'Roll Number',
       'Student Full Name',
-      'Email Address',
       'Account Status',
-      'Password Status',
-      'Student Profile ID',
+      'Answered Count (of 59 Required)',
+      'Submission Status',
+      'Submission Timestamp',
     ];
 
-    studentSheet.columns = [
+    summarySheet.columns = [
       { key: 'rollNumber', width: 16 },
       { key: 'fullName', width: 30 },
-      { key: 'email', width: 32 },
-      { key: 'accountStatus', width: 18 },
-      { key: 'passwordStatus', width: 24 },
-      { key: 'studentId', width: 40 },
+      { key: 'accountStatus', width: 16 },
+      { key: 'answeredCount', width: 28 },
+      { key: 'status', width: 20 },
+      { key: 'submittedAt', width: 26 },
     ];
 
-    const s1HeaderRow = studentSheet.getRow(4);
-    s1HeaderRow.height = 26;
-    s1HeaderRow.eachCell((cell) => {
+    const headerRow = summarySheet.getRow(4);
+    headerRow.height = 26;
+    headerRow.eachCell((cell) => {
       cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = {
         type: 'pattern',
@@ -1087,18 +959,28 @@ export class AdminService {
     });
 
     // Populate Student Rows
-    students.forEach((student, index) => {
+    summaries.forEach((student, index) => {
       const rowIndex = 5 + index;
-      const row = studentSheet.getRow(rowIndex);
-      const passStatus = student.password_changed_at || student.must_change_password === false ? 'Changed' : 'Default (Must Change)';
+      const row = summarySheet.getRow(rowIndex);
+
+      const formattedStatus = 
+        student.status === 'submitted' 
+          ? 'SUBMITTED' 
+          : student.status === 'in_progress' 
+            ? 'IN PROGRESS' 
+            : 'NOT STARTED';
+
+      const formattedTime = student.submittedAt 
+        ? new Date(student.submittedAt).toLocaleString() 
+        : '—';
 
       row.values = [
-        student.roll_number,
-        student.full_name,
-        student.email || `${student.roll_number.toLowerCase()}@mcafarewell.com`,
-        student.is_active ? 'ACTIVE' : 'DISABLED',
-        passStatus,
-        student.id,
+        student.rollNumber,
+        student.fullName,
+        student.isActive ? 'ACTIVE' : 'DISABLED',
+        `${student.answeredCount} / 59`,
+        formattedStatus,
+        formattedTime,
       ];
 
       row.height = 22;
@@ -1118,61 +1000,75 @@ export class AdminService {
           left: { style: 'thin', color: { argb: 'FFE6D5D8' } },
         };
 
-        if (colNumber === 1 || colNumber === 4 || colNumber === 5) {
+        if (colNumber === 1 || colNumber === 3 || colNumber === 4) {
           cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        } else if (colNumber === 5) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          if (student.status === 'submitted') {
+            cell.font = { bold: true, color: { argb: 'FF1B5E20' } };
+          } else if (student.status === 'in_progress') {
+            cell.font = { bold: true, color: { argb: 'FFB78103' } };
+          } else {
+            cell.font = { color: { argb: 'FF888888' } };
+          }
         } else {
           cell.alignment = { vertical: 'middle', horizontal: 'left' };
         }
       });
     });
 
-    studentSheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + students.length), column: 6 } };
+    summarySheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + summaries.length), column: 6 } };
 
     // =========================================================================
-    // SHEET 2: Question Bank
+    // SHEET 2: Detailed Memory Responses
     // =========================================================================
-    const questionSheet = workbook.addWorksheet('Question Bank', {
+    const detailSheet = workbook.addWorksheet('Detailed Memory Responses', {
       views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
       properties: { tabColor: { argb: 'FFC59B27' } },
     });
 
-    questionSheet.mergeCells('A1:D1');
-    const s2Title = questionSheet.getCell('A1');
-    s2Title.value = 'MCA MEMORIES 2025–2027 • QUESTION BANK';
-    s2Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-    s2Title.fill = {
+    detailSheet.mergeCells('A1:G1');
+    const dTitleCell = detailSheet.getCell('A1');
+    dTitleCell.value = 'MCA MEMORIES 2025–2027 • DETAILED MEMORY RESPONSES';
+    dTitleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    dTitleCell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF8F6A0C' },
+      fgColor: { argb: 'FF581C3F' },
     };
-    s2Title.alignment = { vertical: 'middle', horizontal: 'center' };
-    questionSheet.getRow(1).height = 36;
+    dTitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    detailSheet.getRow(1).height = 36;
 
-    questionSheet.mergeCells('A2:D2');
-    const s2Sub = questionSheet.getCell('A2');
-    const activeQuestionsCount = questions.filter((q) => q.is_active).length;
-    s2Sub.value = `Total Questions: ${questions.length} • Active Questions: ${activeQuestionsCount} • Exported on ${exportTimestamp}`;
-    s2Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
-    s2Sub.alignment = { vertical: 'middle', horizontal: 'center' };
-    questionSheet.getRow(2).height = 22;
+    detailSheet.mergeCells('A2:G2');
+    const dSubCell = detailSheet.getCell('A2');
+    dSubCell.value = `Total Saved Responses: ${detailed.length} • Required per student: 59 • Confidential Yearbook Data`;
+    dSubCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
+    dSubCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    detailSheet.getRow(2).height = 22;
 
-    questionSheet.getRow(4).values = [
-      'Question #',
-      'Yearbook Memory Question Prompt',
-      'Active Status',
-      'Question Record ID',
+    detailSheet.getRow(4).values = [
+      'Respondent Roll No',
+      'Respondent Name',
+      'Q#',
+      'Yearbook Memory Question',
+      'Selected Classmate Roll',
+      'Selected Classmate Name',
+      'Timestamp',
     ];
 
-    questionSheet.columns = [
-      { key: 'qNum', width: 14 },
-      { key: 'qText', width: 72 },
-      { key: 'status', width: 16 },
-      { key: 'qId', width: 40 },
+    detailSheet.columns = [
+      { key: 'respRoll', width: 18 },
+      { key: 'respName', width: 26 },
+      { key: 'qNum', width: 8 },
+      { key: 'qText', width: 62 },
+      { key: 'chosenRoll', width: 22 },
+      { key: 'chosenName', width: 26 },
+      { key: 'timestamp', width: 24 },
     ];
 
-    const s2HeaderRow = questionSheet.getRow(4);
-    s2HeaderRow.height = 26;
-    s2HeaderRow.eachCell((cell) => {
+    const dHeaderRow = detailSheet.getRow(4);
+    dHeaderRow.height = 26;
+    dHeaderRow.eachCell((cell) => {
       cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = {
         type: 'pattern',
@@ -1186,118 +1082,15 @@ export class AdminService {
       };
     });
 
-    questions.forEach((q, index) => {
-      const rowIndex = 5 + index;
-      const row = questionSheet.getRow(rowIndex);
-
-      row.values = [
-        q.question_number,
-        q.question_text,
-        q.is_active ? 'ACTIVE' : 'INACTIVE',
-        q.id,
-      ];
-
-      row.height = 24;
-      const isEven = index % 2 === 0;
-      const bgColor = isEven ? 'FFFFFFFF' : 'FFFDFBF7';
-
-      row.eachCell((cell, colNumber) => {
-        cell.font = { name: 'Calibri', size: 10 };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: bgColor },
-        };
-        cell.border = {
-          bottom: { style: 'thin', color: { argb: 'FFEEDDC5' } },
-          right: { style: 'thin', color: { argb: 'FFEEDDC5' } },
-          left: { style: 'thin', color: { argb: 'FFEEDDC5' } },
-        };
-
-        if (colNumber === 1 || colNumber === 3) {
-          cell.alignment = { vertical: 'middle', horizontal: 'center' };
-        } else {
-          cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: colNumber === 2 };
-        }
-      });
-    });
-
-    questionSheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + questions.length), column: 4 } };
-
-    // =========================================================================
-    // SHEET 3: Answers - Memory Selections
-    // =========================================================================
-    const answersSheet = workbook.addWorksheet('Answers - Memory Selections', {
-      views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
-      properties: { tabColor: { argb: 'FF87426A' } },
-    });
-
-    answersSheet.mergeCells('A1:H1');
-    const s3Title = answersSheet.getCell('A1');
-    s3Title.value = 'MCA MEMORIES 2025–2027 • ANSWERS & MEMORY SELECTIONS';
-    s3Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-    s3Title.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF581C3F' },
-    };
-    s3Title.alignment = { vertical: 'middle', horizontal: 'center' };
-    answersSheet.getRow(1).height = 36;
-
-    answersSheet.mergeCells('A2:H2');
-    const s3Sub = answersSheet.getCell('A2');
-    s3Sub.value = `Total Recorded Selections: ${answerMemoryRows.length} • Required per student: 59 • Confidential Yearbook Data • Exported on ${exportTimestamp}`;
-    s3Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
-    s3Sub.alignment = { vertical: 'middle', horizontal: 'center' };
-    answersSheet.getRow(2).height = 22;
-
-    answersSheet.getRow(4).values = [
-      'Respondent Roll Number',
-      'Respondent Name',
-      'Question #',
-      'Yearbook Memory Question Prompt',
-      'Selected Classmate Roll Number',
-      'Selected Classmate Name',
-      'Answer Record ID',
-      'Answered Timestamp',
-    ];
-
-    answersSheet.columns = [
-      { key: 'respRoll', width: 22 },
-      { key: 'respName', width: 28 },
-      { key: 'qNum', width: 14 },
-      { key: 'qText', width: 62 },
-      { key: 'chosenRoll', width: 24 },
-      { key: 'chosenName', width: 28 },
-      { key: 'ansId', width: 40 },
-      { key: 'timestamp', width: 24 },
-    ];
-
-    const s3HeaderRow = answersSheet.getRow(4);
-    s3HeaderRow.height = 26;
-    s3HeaderRow.eachCell((cell) => {
-      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF87426A' },
-      };
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFD99CA5' } },
-        bottom: { style: 'medium', color: { argb: 'FF42112D' } },
-      };
-    });
-
-    if (answerMemoryRows.length === 0) {
-      const emptyRow = answersSheet.getRow(5);
-      emptyRow.values = ['No answers submitted yet.', '', '', '', '', '', '', ''];
+    if (detailed.length === 0) {
+      const emptyRow = detailSheet.getRow(5);
+      emptyRow.values = ['No answers submitted yet.', '', '', '', '', '', ''];
       emptyRow.height = 30;
       emptyRow.getCell(1).font = { italic: true, color: { argb: 'FF888888' } };
     } else {
-      answerMemoryRows.forEach((rowItem, index) => {
+      detailed.forEach((rowItem, index) => {
         const rowIndex = 5 + index;
-        const row = answersSheet.getRow(rowIndex);
+        const row = detailSheet.getRow(rowIndex);
 
         row.values = [
           rowItem.respondentRollNumber,
@@ -1306,12 +1099,118 @@ export class AdminService {
           rowItem.questionText,
           rowItem.selectedClassmateRollNumber,
           rowItem.selectedClassmateName,
-          rowItem.answerId,
-          formatExportDateTime(rowItem.answeredAt),
+          new Date(rowItem.answeredAt).toLocaleString(),
         ];
 
         row.height = 22;
         const isEven = index % 2 === 0;
+        const bgColor = isEven ? 'FFFFFFFF' : 'FFFDFBF7';
+
+        row.eachCell((cell, colNumber) => {
+          cell.font = { name: 'Calibri', size: 10 };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: bgColor },
+          };
+          cell.border = {
+            bottom: { style: 'thin', color: { argb: 'FFEEDDC5' } },
+          };
+
+          if (colNumber === 1 || colNumber === 3 || colNumber === 5) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+          } else {
+            cell.alignment = { vertical: 'middle', horizontal: 'left' };
+          }
+        });
+      });
+    }
+
+    detailSheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + detailed.length), column: 7 } };
+
+    // =========================================================================
+    // SHEET 3: Student & Question Analysis
+    // =========================================================================
+    const sheet3 = workbook.addWorksheet('Student & Question Analysis', {
+      views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
+      properties: { tabColor: { argb: 'FF87426A' } },
+    });
+
+    sheet3.mergeCells('A1:F1');
+    const s3Title = sheet3.getCell('A1');
+    s3Title.value = 'MCA MEMORIES 2025–2027 • STUDENT & QUESTION ANALYSIS';
+    s3Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    s3Title.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF581C3F' },
+    };
+    s3Title.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet3.getRow(1).height = 36;
+
+    sheet3.mergeCells('A2:F2');
+    const s3Sub = sheet3.getCell('A2');
+    s3Sub.value = `Repetition Analysis of Student Nominations • ${analysisData.sheet3Rows.length} Distinct Student-Question Combinations • Exported on ${new Date().toLocaleString()}`;
+    s3Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
+    s3Sub.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet3.getRow(2).height = 22;
+
+    sheet3.getRow(4).values = [
+      'Selected Student Roll Number',
+      'Selected Student Name',
+      'Question Text',
+      'Repetition Count',
+      'Selected By: Respondent Roll Numbers',
+      'Selected By: Respondent Names',
+    ];
+
+    sheet3.columns = [
+      { key: 'selectedRoll', width: 22 },
+      { key: 'selectedName', width: 28 },
+      { key: 'questionText', width: 55 },
+      { key: 'repetitionCount', width: 18 },
+      { key: 'respondentRolls', width: 36 },
+      { key: 'respondentNames', width: 45 },
+    ];
+
+    const s3HeaderRow = sheet3.getRow(4);
+    s3HeaderRow.height = 26;
+    s3HeaderRow.eachCell((cell) => {
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF581C3F' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD99CA5' } },
+        bottom: { style: 'medium', color: { argb: 'FF42112D' } },
+      };
+    });
+
+    if (analysisData.sheet3Rows.length === 0) {
+      const emptyRow = sheet3.getRow(5);
+      emptyRow.values = ['No student nominations recorded yet.', '', '', 0, '', ''];
+      emptyRow.height = 28;
+      emptyRow.getCell(1).font = { italic: true, color: { argb: 'FF888888' } };
+    } else {
+      analysisData.sheet3Rows.forEach((item, idx) => {
+        const rowIndex = 5 + idx;
+        const row = sheet3.getRow(rowIndex);
+        const rollVal = formatRollValue(item.selectedStudentRollNumber);
+
+        row.values = [
+          rollVal,
+          item.selectedStudentName,
+          item.questionText,
+          item.repetitionCount,
+          item.respondentRollNumbers,
+          item.respondentNames,
+        ];
+
+        row.height = 26;
+        const isEven = idx % 2 === 0;
         const bgColor = isEven ? 'FFFFFFFF' : 'FFFDF8F5';
 
         row.eachCell((cell, colNumber) => {
@@ -1327,28 +1226,51 @@ export class AdminService {
             left: { style: 'thin', color: { argb: 'FFE6D5D8' } },
           };
 
-          if (colNumber === 1 || colNumber === 3 || colNumber === 5 || colNumber === 8) {
+          if (colNumber === 1) {
             cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            if (typeof rollVal === 'number') {
+              cell.numFmt = '0';
+            }
+          } else if (colNumber === 4) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            cell.numFmt = '#,##0';
+            // Subtle conditional highlight for higher repetition counts
+            if (item.repetitionCount >= 5) {
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFF5E6EC' },
+              };
+              cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF581C3F' } };
+            } else if (item.repetitionCount >= 2) {
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFFAF2F5' },
+              };
+              cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF732A54' } };
+            }
           } else {
-            cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: colNumber === 4 };
+            cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: colNumber === 3 || colNumber === 5 || colNumber === 6 };
           }
         });
       });
     }
 
-    answersSheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + answerMemoryRows.length), column: 8 } };
+    const s3LastRow = Math.max(5, 4 + analysisData.sheet3Rows.length);
+    sheet3.autoFilter = { from: { row: 4, column: 1 }, to: { row: s3LastRow, column: 6 } };
 
     // =========================================================================
-    // SHEET 4: Submission Summary
+    // SHEET 4: Student Selection Summary
     // =========================================================================
-    const summarySheet = workbook.addWorksheet('Submission Summary', {
+    const sheet4 = workbook.addWorksheet('Student Selection Summary', {
       views: [{ state: 'frozen', ySplit: 4, showGridLines: true }],
       properties: { tabColor: { argb: 'FF4A1525' } },
     });
 
-    summarySheet.mergeCells('A1:G1');
-    const s4Title = summarySheet.getCell('A1');
-    s4Title.value = 'MCA MEMORIES 2025–2027 • SUBMISSION SUMMARY';
+    sheet4.mergeCells('A1:F1');
+    const s4Title = sheet4.getCell('A1');
+    s4Title.value = 'MCA MEMORIES 2025–2027 • STUDENT SELECTION SUMMARY';
     s4Title.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
     s4Title.fill = {
       type: 'pattern',
@@ -1356,44 +1278,41 @@ export class AdminService {
       fgColor: { argb: 'FF4A1525' },
     };
     s4Title.alignment = { vertical: 'middle', horizontal: 'center' };
-    summarySheet.getRow(1).height = 36;
+    sheet4.getRow(1).height = 36;
 
-    summarySheet.mergeCells('A2:G2');
-    const s4Sub = summarySheet.getCell('A2');
-    const submittedCount = submissionSummaryRows.filter((s) => s.submissionStatus === 'SUBMITTED').length;
-    s4Sub.value = `Batch of ${submissionSummaryRows.length} Students • ${submittedCount} Completed • ${submissionSummaryRows.length - submittedCount} Pending • 59 Required Answers Denominator • Exported on ${exportTimestamp}`;
+    sheet4.mergeCells('A2:F2');
+    const s4Sub = sheet4.getCell('A2');
+    s4Sub.value = `Comprehensive Selection Totals Across All ${analysisData.sheet4Rows.length} Students • Sorted by Roll Number Numerically • Exported on ${new Date().toLocaleString()}`;
     s4Sub.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
     s4Sub.alignment = { vertical: 'middle', horizontal: 'center' };
-    summarySheet.getRow(2).height = 22;
+    sheet4.getRow(2).height = 22;
 
-    summarySheet.getRow(4).values = [
-      'Roll Number',
-      'Student Full Name',
-      'Actual Valid Answer Count (of 59)',
-      'Distinct-Classmate Count',
-      'Submission Status',
-      'Submission Timestamp',
-      'Account Status',
+    sheet4.getRow(4).values = [
+      'Student Roll Number',
+      'Student Name',
+      'Total Selections Received',
+      'Number of Distinct Questions',
+      'Most Frequently Associated Question',
+      'Highest Question Repetition Count',
     ];
 
-    summarySheet.columns = [
-      { key: 'rollNumber', width: 16 },
-      { key: 'fullName', width: 30 },
-      { key: 'answerCount', width: 32 },
-      { key: 'distinctCount', width: 26 },
-      { key: 'status', width: 22 },
-      { key: 'submittedAt', width: 26 },
-      { key: 'accountStatus', width: 16 },
+    sheet4.columns = [
+      { key: 'studentRoll', width: 20 },
+      { key: 'studentName', width: 28 },
+      { key: 'totalSelections', width: 24 },
+      { key: 'distinctQuestions', width: 26 },
+      { key: 'mostFrequentQuestion', width: 55 },
+      { key: 'highestCount', width: 30 },
     ];
 
-    const s4HeaderRow = summarySheet.getRow(4);
+    const s4HeaderRow = sheet4.getRow(4);
     s4HeaderRow.height = 26;
     s4HeaderRow.eachCell((cell) => {
       cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF581C3F' },
+        fgColor: { argb: 'FF4A1525' },
       };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
       cell.border = {
@@ -1402,26 +1321,22 @@ export class AdminService {
       };
     });
 
-    submissionSummaryRows.forEach((student, index) => {
-      const rowIndex = 5 + index;
-      const row = summarySheet.getRow(rowIndex);
-
-      const formattedTime = student.submittedAt
-        ? formatExportDateTime(student.submittedAt)
-        : '—';
+    analysisData.sheet4Rows.forEach((item, idx) => {
+      const rowIndex = 5 + idx;
+      const row = sheet4.getRow(rowIndex);
+      const rollVal = formatRollValue(item.studentRollNumber);
 
       row.values = [
-        student.rollNumber,
-        student.studentName,
-        `${student.answeredCount} / 59`,
-        student.distinctClassmatesCount,
-        student.submissionStatus,
-        formattedTime,
-        student.accountStatus,
+        rollVal,
+        item.studentName,
+        item.totalSelectionsReceived,
+        item.distinctQuestionsCount,
+        item.mostFrequentlyAssociatedQuestion,
+        item.highestQuestionRepetitionCount,
       ];
 
-      row.height = 22;
-      const isEven = index % 2 === 0;
+      row.height = 24;
+      const isEven = idx % 2 === 0;
       const bgColor = isEven ? 'FFFFFFFF' : 'FFFDF8F5';
 
       row.eachCell((cell, colNumber) => {
@@ -1437,24 +1352,33 @@ export class AdminService {
           left: { style: 'thin', color: { argb: 'FFE6D5D8' } },
         };
 
-        if (colNumber === 1 || colNumber === 3 || colNumber === 4 || colNumber === 6 || colNumber === 7) {
+        if (colNumber === 1) {
           cell.alignment = { vertical: 'middle', horizontal: 'center' };
-        } else if (colNumber === 5) {
+          if (typeof rollVal === 'number') {
+            cell.numFmt = '0';
+          }
+        } else if (colNumber === 3 || colNumber === 4 || colNumber === 6) {
           cell.alignment = { vertical: 'middle', horizontal: 'center' };
-          if (student.submissionStatus === 'SUBMITTED') {
-            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1B5E20' } };
-          } else if (student.submissionStatus === 'IN PROGRESS') {
-            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB78103' } };
-          } else {
-            cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF888888' } };
+          cell.numFmt = '#,##0';
+          if (colNumber === 3 && item.totalSelectionsReceived >= 10) {
+            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF581C3F' } };
+          }
+          if (colNumber === 6 && item.highestQuestionRepetitionCount >= 5) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFF5E6EC' },
+            };
+            cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF581C3F' } };
           }
         } else {
-          cell.alignment = { vertical: 'middle', horizontal: 'left' };
+          cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: colNumber === 5 };
         }
       });
     });
 
-    summarySheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(5, 4 + submissionSummaryRows.length), column: 7 } };
+    const s4LastDataRow = 4 + analysisData.sheet4Rows.length;
+    sheet4.autoFilter = { from: { row: 4, column: 1 }, to: { row: s4LastDataRow, column: 6 } };
 
     // Write buffer and trigger browser download
     const buffer = await workbook.xlsx.writeBuffer();

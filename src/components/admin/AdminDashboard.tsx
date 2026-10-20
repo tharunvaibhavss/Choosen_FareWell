@@ -608,40 +608,40 @@ export const AdminDashboard: React.FC = () => {
             <div className="p-4 rounded-xl bg-[#faedf2] border border-[#eed5da]">
               <div className="flex items-center gap-2 text-[#581c3f] font-bold text-sm mb-1">
                 <CheckCheck className="w-4 h-4 text-[#581c3f]" />
-                <span>Sheet 1: Student Details</span>
+                <span>Sheet 1: Summary Report</span>
               </div>
               <p className="text-xs text-[#70645c] leading-relaxed">
-                Contains all 60 registered student profiles with their roll numbers (25MCA001–25MCA060), full names, email addresses, account status, and password change status.
+                Contains all {summaries.length} student profiles with their unique roll numbers, full names, active account status, answered counts (out of 59 required), and submission timestamps.
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-[#fef8e7] border border-[#e8d29b]">
               <div className="flex items-center gap-2 text-[#946e10] font-bold text-sm mb-1">
                 <CheckCheck className="w-4 h-4 text-[#c59b27]" />
-                <span>Sheet 2: Question Bank</span>
+                <span>Sheet 2: Detailed Memory Responses</span>
               </div>
               <p className="text-xs text-[#70645c] leading-relaxed">
-                Complete directory of all 72 active yearbook memory questions, prompt texts, sequential question numbers, and system IDs.
+                Contains every granular answer recorded: Respondent Roll & Name, Question Number, Memory Prompt Text, Selected Classmate Roll & Name, and Timestamp.
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-[#f5eef4] border border-[#d9b8cc]">
               <div className="flex items-center gap-2 text-[#581c3f] font-bold text-sm mb-1">
                 <CheckCheck className="w-4 h-4 text-[#581c3f]" />
-                <span>Sheet 3: Memory Selections</span>
+                <span>Sheet 3: Student & Question Analysis</span>
               </div>
               <p className="text-xs text-[#70645c] leading-relaxed">
-                Complete database of all saved memory selections with respondent roll & name, question prompt, selected classmate roll & name, answer ID, and timestamp.
+                Repetition breakdown showing which classmates were selected for each question, repetition frequency, and numerically sorted lists of respondent roll numbers and names.
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-[#f9f1f4] border border-[#cb9fb3]">
               <div className="flex items-center gap-2 text-[#4a1525] font-bold text-sm mb-1">
                 <CheckCheck className="w-4 h-4 text-[#4a1525]" />
-                <span>Sheet 4: Submission Summary</span>
+                <span>Sheet 4: Student Selection Summary</span>
               </div>
               <p className="text-xs text-[#70645c] leading-relaxed">
-                Submission tracking across all 60 students: valid answer count out of 59, distinct classmates selected, verified submission status, and timestamp.
+                Full summary across all 60 students in numerical roll order: total selections received, distinct questions count, top associated question, and highest repetition count.
               </p>
             </div>
           </div>
