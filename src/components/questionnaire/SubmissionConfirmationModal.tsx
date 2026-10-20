@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, X, Send, Lock } from 'lucide-react';
 interface SubmissionConfirmationModalProps {
   isOpen: boolean;
   answeredCount: number;
+  distinctCount?: number;
   totalQuestions: number;
   markedCount: number;
   isSubmitting: boolean;
@@ -14,6 +15,7 @@ interface SubmissionConfirmationModalProps {
 export const SubmissionConfirmationModal: React.FC<SubmissionConfirmationModalProps> = ({
   isOpen,
   answeredCount,
+  distinctCount,
   totalQuestions = 72,
   markedCount,
   isSubmitting,
@@ -23,7 +25,7 @@ export const SubmissionConfirmationModal: React.FC<SubmissionConfirmationModalPr
   if (!isOpen) return null;
 
   const unansweredCount = totalQuestions - answeredCount;
-  const isEligible = answeredCount >= 59;
+  const isEligible = answeredCount >= 59 && (distinctCount === undefined || distinctCount >= 59);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
@@ -96,7 +98,11 @@ export const SubmissionConfirmationModal: React.FC<SubmissionConfirmationModalPr
           </div>
           <div className="flex items-center gap-2 text-emerald-800 font-medium">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>Each classmate is selected at most once (zero duplicates)</span>
+            <span>
+              Each classmate is selected at most once (
+              {distinctCount !== undefined ? `${distinctCount} distinct classmates` : 'zero duplicates'}
+              )
+            </span>
           </div>
           <div className="flex items-center gap-2 text-emerald-800 font-medium">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />

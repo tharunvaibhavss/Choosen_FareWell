@@ -474,17 +474,63 @@ export class AdminService {
       return [];
     }
     try {
+      // 1. Primary path: High-performance, secure database-side aggregation RPC
+      const { data: rpcData, error: rpcError } = await supabase.rpc('admin_get_student_summaries');
+
+      if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+        return rpcData.map((item: {
+          id: string;
+          roll_number: string;
+          full_name: string;
+          email: string | null;
+          is_active: boolean | null;
+          answered_count: number | string;
+          distinct_choices_count: number | string;
+          submission_status: string | null;
+          submitted_at: string | null;
+          must_change_password: boolean | null;
+          password_changed_at: string | null;
+        }) => {
+          const answeredCount = Number(item.answered_count) || 0;
+          let status: StudentSummaryItem['status'] = 'not_started';
+          if (item.submission_status === 'submitted') {
+            status = 'submitted';
+          } else if (answeredCount > 0) {
+            status = 'in_progress';
+          }
+
+          const studentEmail = item.email || '';
+
+          return {
+            id: item.id,
+            rollNumber: item.roll_number,
+            fullName: item.full_name,
+            email: studentEmail,
+            isActive: item.is_active ?? true,
+            loginIdentifier: studentEmail,
+            answeredCount,
+            distinctChoicesCount: Number(item.distinct_choices_count) || 0,
+            status,
+            submittedAt: item.submitted_at || null,
+            mustChangePassword: item.must_change_password ?? true,
+            passwordChangedAt: item.password_changed_at || null,
+          };
+        });
+      }
+
+      if (rpcError) {
+        console.warn('admin_get_student_summaries RPC unavailable, falling back to paginated query:', rpcError.message);
+      }
+
+      // 2. Resilient fallback path: Paginated retrieval ensuring zero rows are lost to PostgREST 1,000-row limits
       const { data: students, error: studErr } = await supabase
         .from('profiles')
         .select('id, roll_number, full_name, email, is_active, must_change_password, password_changed_at')
         .eq('role', 'student')
         .order('roll_number', { ascending: true });
 
-      if (studErr) {
-        console.error('Error fetching students for summary:', studErr.message);
-        return [];
-      }
-      if (!students || students.length === 0) {
+      if (studErr || !students || students.length === 0) {
+        if (studErr) console.error('Error fetching students for summary:', studErr.message);
         return [];
       }
 
@@ -492,16 +538,34 @@ export class AdminService {
         .from('submissions')
         .select('*');
 
-      const { data: answers } = await supabase
-        .from('answers')
-        .select('respondent_id');
+      const countMap = new Map<string, number>();
+      const pageSize = 1000;
+      let from = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: chunk, error: chunkErr } = await supabase
+          .from('answers')
+          .select('respondent_id')
+          .range(from, from + pageSize - 1);
+
+        if (chunkErr || !chunk || chunk.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        chunk.forEach((a) => {
+          countMap.set(a.respondent_id, (countMap.get(a.respondent_id) || 0) + 1);
+        });
+
+        if (chunk.length < pageSize) {
+          hasMore = false;
+        } else {
+          from += pageSize;
+        }
+      }
 
       const subMap = new Map((submissions || []).map((s) => [s.student_id, s]));
-      const countMap = new Map<string, number>();
-
-      (answers || []).forEach((a) => {
-        countMap.set(a.respondent_id, (countMap.get(a.respondent_id) || 0) + 1);
-      });
 
       return students.map((s) => {
         const sub = subMap.get(s.id);
@@ -523,6 +587,7 @@ export class AdminService {
           isActive: s.is_active ?? true,
           loginIdentifier: studentEmail,
           answeredCount,
+          distinctChoicesCount: answeredCount,
           status,
           submittedAt: sub ? sub.submitted_at : null,
           mustChangePassword: s.must_change_password ?? true,

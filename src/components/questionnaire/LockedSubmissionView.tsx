@@ -40,7 +40,7 @@ export const LockedSubmissionView: React.FC<LockedSubmissionViewProps> = ({
     : 'Recently';
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 py-8 pb-20 space-y-6">
       {/* Top Celebratory Banner */}
       <div className="scrapbook-card p-6 sm:p-10 text-center bg-[#fffdfa] relative overflow-hidden">
         <TapeStrip type="rose" className="absolute -top-2 left-10 rotate-3" />
@@ -87,7 +87,7 @@ export const LockedSubmissionView: React.FC<LockedSubmissionViewProps> = ({
           </span>
         </div>
 
-        <div className="divide-y divide-[#f2e9de] max-h-[500px] overflow-y-auto pr-2">
+        <div className="divide-y divide-[#f2e9de]">
           {questions.map((q) => {
             const chosenId = answersMap.get(q.question_id);
             const chosenStudent = chosenId ? classmatesMap.get(chosenId) : null;

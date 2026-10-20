@@ -103,7 +103,7 @@ export const App: React.FC = () => {
 
   // If authenticated and password status is satisfied:
   return (
-    <div className={`min-h-screen flex flex-col bg-[#fcfaf6] ${!isAdmin ? 'lg:h-screen lg:overflow-hidden' : ''}`}>
+    <div className="min-h-screen flex flex-col bg-[#fcfaf6]">
       {/* Top Header */}
       <Header
         user={currentUser}
@@ -112,7 +112,7 @@ export const App: React.FC = () => {
       />
 
       {/* Role-based routing */}
-      <div className={`flex-1 flex flex-col ${isAdmin ? 'w-full' : 'min-h-0 overflow-y-auto lg:overflow-hidden'}`}>
+      <div className="flex-1 flex flex-col w-full">
         {isAdmin ? (
           <AdminDashboard />
         ) : (

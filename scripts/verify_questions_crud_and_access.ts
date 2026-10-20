@@ -28,8 +28,8 @@ function loadLocalEnv(relativeFilePath: string) {
 
 loadLocalEnv('.env.local');
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL)!;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 if (!supabaseUrl || !serviceKey) {
   console.error('Missing Supabase URL or Service Role Key in environment');

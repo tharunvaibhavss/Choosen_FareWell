@@ -107,7 +107,7 @@ export const QuestionnairePage: React.FC<QuestionnairePageProps> = ({ user }) =>
     return () => {
       isMounted = false;
     };
-  }, [user.id]);
+  }, [user.id, user.profile.role]);
 
   // Derived set of answered question IDs
   const answeredQuestionIds = useMemo(() => {
@@ -274,10 +274,40 @@ export const QuestionnairePage: React.FC<QuestionnairePageProps> = ({ user }) =>
     }
   };
 
+  // Derived distinct classmate count (Rule B check)
+  const distinctClassmateCount = useMemo(() => {
+    return new Set(answersMap.values()).size;
+  }, [answersMap]);
+
   // Final submission confirmation handler
   const handleFinalSubmit = async () => {
+    // 1. Rule D: Must answer at least 59 memories
     if (answersMap.size < 59) {
       alert(`Rule D: You must answer at least 59 memories. Current count: ${answersMap.size}`);
+      return;
+    }
+
+    // 2. Rule B: Must select at least 59 distinct classmates
+    const selectedClassmateIds = Array.from(answersMap.values());
+    const distinctSet = new Set(selectedClassmateIds);
+    if (distinctSet.size < 59) {
+      alert(
+        `Rule B: You must select at least 59 distinct classmates before submitting. You currently have ${distinctSet.size} distinct classmate(s) selected across ${answersMap.size} answered memories.`
+      );
+      return;
+    }
+
+    // 3. Rule C: Cannot select self
+    if (distinctSet.has(user.id)) {
+      alert('Rule C: A student cannot select themselves as a classmate choice.');
+      return;
+    }
+
+    // 4. Integrity check: Verify all selected IDs belong to eligible classmates pool
+    const validClassmateIds = new Set(classmates.map((c) => c.id));
+    const hasInvalid = selectedClassmateIds.some((cid) => !validClassmateIds.has(cid));
+    if (hasInvalid) {
+      alert('One or more selected classmates are invalid. Please review your selections before submitting.');
       return;
     }
 
@@ -405,11 +435,11 @@ export const QuestionnairePage: React.FC<QuestionnairePageProps> = ({ user }) =>
       <QuestionnaireFooter
         currentIndex={currentIndex}
         totalQuestions={questions.length}
-        currentQuestion={currentQuestion}
         isFirstQuestion={currentIndex === 0}
         isLastQuestion={currentIndex === questions.length - 1}
         isMarkedForReview={isCurrentMarked}
         answeredCount={answersMap.size}
+        distinctCount={distinctClassmateCount}
         requiredCount={59}
         onPrevious={handlePrevious}
         onNext={handleNext}
@@ -422,6 +452,7 @@ export const QuestionnairePage: React.FC<QuestionnairePageProps> = ({ user }) =>
       <SubmissionConfirmationModal
         isOpen={isModalOpen}
         answeredCount={answersMap.size}
+        distinctCount={distinctClassmateCount}
         totalQuestions={questions.length}
         markedCount={markedQuestionIds.size}
         isSubmitting={isSubmitting}

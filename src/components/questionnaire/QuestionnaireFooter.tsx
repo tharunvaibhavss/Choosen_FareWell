@@ -1,15 +1,13 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, Bookmark, CheckCircle, Send, BookmarkCheck } from 'lucide-react';
-import type { StudentQuestionOrder } from '../../types/database';
-
 interface QuestionnaireFooterProps {
   currentIndex: number;
   totalQuestions: number;
-  currentQuestion?: StudentQuestionOrder;
   isFirstQuestion: boolean;
   isLastQuestion: boolean;
   isMarkedForReview: boolean;
   answeredCount: number;
+  distinctCount?: number;
   requiredCount?: number;
   onPrevious: () => void;
   onNext: () => void;
@@ -25,6 +23,7 @@ export const QuestionnaireFooter: React.FC<QuestionnaireFooterProps> = ({
   isLastQuestion,
   isMarkedForReview,
   answeredCount,
+  distinctCount,
   requiredCount = 59,
   onPrevious,
   onNext,
@@ -32,7 +31,7 @@ export const QuestionnaireFooter: React.FC<QuestionnaireFooterProps> = ({
   onSubmitClick,
   isSaving,
 }) => {
-  const isSubmitEligible = answeredCount >= requiredCount;
+  const isSubmitEligible = answeredCount >= requiredCount && (distinctCount === undefined || distinctCount >= requiredCount);
   const displayPosition = currentIndex + 1;
 
   return (
@@ -101,7 +100,9 @@ export const QuestionnaireFooter: React.FC<QuestionnaireFooterProps> = ({
             title={
               isSubmitEligible
                 ? 'Submit your final yearbook questionnaire'
-                : `Need ${requiredCount - answeredCount} more answers to submit (at least 59 required)`
+                : distinctCount !== undefined && distinctCount < requiredCount && answeredCount >= requiredCount
+                ? `Need ${requiredCount} distinct classmates (currently ${distinctCount} distinct)`
+                : `Need ${requiredCount - answeredCount} more answers to submit (at least ${requiredCount} required)`
             }
           >
             <Send className="w-3 h-3" />

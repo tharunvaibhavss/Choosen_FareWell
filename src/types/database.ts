@@ -63,6 +63,7 @@ export interface StudentSummaryItem {
   isActive: boolean;
   loginIdentifier: string;
   answeredCount: number;
+  distinctChoicesCount?: number;
   status: 'submitted' | 'in_progress' | 'not_started';
   submittedAt: string | null;
   mustChangePassword?: boolean;
